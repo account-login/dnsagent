@@ -2,7 +2,7 @@ from ipaddress import IPv4Address, IPv6Address
 from twisted.internet import interfaces, defer
 from twisted.names import client, common, error, dns
 from zope.interface import implementer
-import iprir.database
+from iprir.ipset import IpSet
 
 from dnsagent import logger
 
@@ -118,7 +118,8 @@ class DualResovlver(common.ResolverBase):
 
 
 class DualHandler:
-    ipdb = None
+    cn4_set = None
+    cn6_set = None
 
     STATUS_FAIL = 'fail'
     STATUS_SUCC = 'succ'
@@ -142,15 +143,17 @@ class DualHandler:
         ab_defered.addErrback(self.ab_fail)
 
     @classmethod
-    def is_cn_ip(cls, ip):
-        if cls.ipdb is None:
-            cls.ipdb = iprir.database.DB()
-
-        result = cls.ipdb.by_ip(ip)
-        if result is not None and result.country == 'CN':
-            return True
+    def is_cn_ip(cls, ip) -> bool:
+        if isinstance(ip, IPv4Address):
+            if cls.cn4_set is None:
+                cls.cn4_set = IpSet.by_country('ipv4', 'CN')
+            return ip in cls.cn4_set
+        elif isinstance(ip, IPv6Address):
+            if cls.cn6_set is None:
+                cls.cn6_set = IpSet.by_country('ipv6', 'CN')
+            return ip in cls.cn6_set
         else:
-            return False
+            assert not 'possible'
 
     @classmethod
     def may_be_polluted(cls, result):
