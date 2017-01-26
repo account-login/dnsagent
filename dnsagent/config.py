@@ -112,8 +112,8 @@ class ServerInfo(namedtuple('ServerInfo', 'server port interface'.split())):
 
 def _make_server(resolver, *, cache=True, verbose=5, timeout=None):
     return TimeoutableDNSServerFactory(
-        clients=[resolver],
         caches=[CacheResolver(verbose=verbose)] if cache else None,
+        clients=[resolver],
         verbose=verbose,
         resolve_timeout=timeout,
     )
