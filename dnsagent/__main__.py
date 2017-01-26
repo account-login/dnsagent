@@ -67,12 +67,13 @@ class App:
         )
 
 
-class ConfigReloader:
-    def __init__(self, filename: str, app: App):
+class ConfigLoader:
+    def __init__(self, filename: str, app: App, *, reload=False):
         self.filename = filename
         self.app = app
 
-        watch_modification(self.filename, self.load)
+        if reload:
+            watch_modification(self.filename, self.load)
 
     def load(self):
         try:
@@ -106,13 +107,16 @@ class ConfigReloader:
 def main():
     ap = ArgumentParser(prog='dnsagent', description='A configurable dns proxy')
     ap.add_argument('-c', '--config', required=True, help='configuration file')
+    ap.add_argument(
+        '-r', '--reload', action='store_true',
+        help='automatically reload configuration file')
     option = ap.parse_args()
 
     # Output twisted messages to Python standard library logging module.
     log.PythonLoggingObserver().start()
 
     app = App(reactor)
-    loader = ConfigReloader(option.config, app)
+    loader = ConfigLoader(option.config, app, reload=option.reload)
     succ = loader.load()
     if not succ:
         logger.error('loading server failed. config file: %s', option.config)
