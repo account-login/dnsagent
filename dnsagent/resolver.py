@@ -8,6 +8,7 @@ from zope.interface import implementer
 from iprir.ipset import IpSet
 
 from dnsagent import logger
+from dnsagent.watcher import watch_modification
 
 
 @implementer(interfaces.IResolver)
@@ -296,7 +297,11 @@ class HostsResolver(common.ResolverBase):
         self.ttl = ttl
         self._load_hosts()
 
+        if reload:
+            watch_modification(filename, self._load_hosts)
+
     def _load_hosts(self):
+        logger.debug('loading hosts file: %s', self.filename)
         self.name2ip = read_hosts_file(self.filename)
 
     def _get_a_records(self, name: bytes):

@@ -109,13 +109,13 @@ def dual(cn, ab):
     return DualResovlver(cn, ab)
 
 
-def hosts(filename=None, *, ttl=5*60):
+def hosts(filename=None, *, ttl=5*60, reload=False):
     if filename is None:
         if os.name == 'nt':
             filename = os.path.join(os.environ['SYSTEMROOT'], 'system32/driver/etc/hosts')
         else:
             filename = '/etc/hosts'
-    return HostsResolver(filename, ttl=ttl)
+    return HostsResolver(filename, ttl=ttl, reload=reload)
 
 
 class ServerInfo(namedtuple('ServerInfo', 'server port interface'.split())):
