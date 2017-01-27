@@ -1,8 +1,14 @@
+from ipaddress import ip_address
 import pytest
 
 from dnsagent.config import (
     parse_dns_server_string, DnsServerInfo, InvalidDnsServerString,
 )
+from dnsagent.resolver import parse_hosts_file
+
+
+from dnsagent.__main__ import enable_log
+enable_log()
 
 
 def test_parse_dns_server_string():
@@ -30,3 +36,29 @@ def test_parse_dns_server_string():
     E('[20u::]')
     E('127.0.0.1:ff')
     E('[2000::]ff')
+
+
+def test_parse_hosts_file():
+    def iplist(*lst):
+        return [ip_address(ip) for ip in lst]
+
+    name2ip = parse_hosts_file('''
+        127.0.0.1   localhost loopback
+        ::1         localhost   # asdf
+        127.0.0.1   localhost loopback
+
+        # asdf
+        0.0.0.0     a b
+        0.0.0.1     c a
+
+        # bad lines
+        0.0.0.256 asdf
+        0.0.0.0
+    '''.splitlines())
+    assert name2ip == dict(
+        localhost=iplist('127.0.0.1', '::1'),
+        loopback=iplist('127.0.0.1'),
+        a=iplist('0.0.0.0', '0.0.0.1'),
+        b=iplist('0.0.0.0'),
+        c=iplist('0.0.0.1'),
+    )

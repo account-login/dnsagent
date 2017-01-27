@@ -1,3 +1,4 @@
+import os
 from ipaddress import IPv4Address, IPv6Address, AddressValueError
 from collections import namedtuple
 from twisted.names.common import ResolverBase
@@ -5,11 +6,13 @@ from twisted.names.client import Resolver
 from twisted.names.cache import CacheResolver
 from twisted.names.resolve import ResolverChain
 
-from dnsagent.resolver import ForceTCPResovlver, ParallelResolver, DualResovlver
+from dnsagent.resolver import (
+    ForceTCPResovlver, ParallelResolver, DualResovlver, HostsResolver,
+)
 from dnsagent.server import TimeoutableDNSServerFactory
 
 
-__all__ = ('chain', 'parallel', 'dual', 'server')
+__all__ = ('chain', 'parallel', 'dual', 'hosts', 'server')
 
 
 class InvalidDnsServerString:
@@ -106,6 +109,15 @@ def dual(cn, ab):
     return DualResovlver(cn, ab)
 
 
+def hosts(filename=None, *, ttl=5*60):
+    if filename is None:
+        if os.name == 'nt':
+            filename = os.path.join(os.environ['SYSTEMROOT'], 'system32/driver/etc/hosts')
+        else:
+            filename = '/etc/hosts'
+    return HostsResolver(filename, ttl=ttl)
+
+
 class ServerInfo(namedtuple('ServerInfo', 'server port interface'.split())):
     pass
 
@@ -124,7 +136,9 @@ def server(
         cache=True, verbose=5, timeout=None
 ):
     return ServerInfo(
-        _make_server(resolver, cache=cache, verbose=verbose, timeout=timeout),
+        _make_server(
+            _make_resolver(resolver), cache=cache, verbose=verbose, timeout=timeout,
+        ),
         port,
         interface,
     )
