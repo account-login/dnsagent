@@ -107,6 +107,7 @@ class TestHostsResolver(unittest.TestCase):
         def failed(failure):
             print('query failed: ', query)
             print(failure)
+            d.callback(None)
             assert False
 
         self.resolver.query(query, timeout=[0.5]).addCallbacks(check_result, failed)
