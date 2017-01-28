@@ -93,36 +93,56 @@ class TestHostsResolver(unittest.TestCase):
         self.resolver = HostsResolver(self.hosts_file, reload=True)
         os.close(fd)
 
-    def _check_query(self, query: dns.Query, expect):
+    def _check_query(self, query: dns.Query, expect=None, fail=False):
+        if fail:
+            assert expect is None
+
         d = defer.Deferred()
         self.defereds.append(d)
 
         def check_result(result):
             try:
+                if fail:
+                    self.fail('dns failure expected')
+
                 ans, auth, add = result
                 assert [dns_record_to_ip(rr.payload) for rr in ans] == expect
             finally:
                 d.callback(None)
 
         def failed(failure):
-            print('query failed: ', query)
-            print(failure)
-            d.callback(None)
-            assert False
+            try:
+                if not fail:
+                    print('query failed: ', query)
+                    print(failure)
+                    self.fail('query failed')
+            finally:
+                d.callback(None)
 
         self.resolver.query(query, timeout=[0.5]).addCallbacks(check_result, failed)
 
-    def check_a(self, name: str, expect: list):
-        self._check_query(dns.Query(name.encode('utf8'), dns.A, dns.IN), expect)
+    def check_a(self, name: str, expect=None, fail=False):
+        self._check_query(
+            dns.Query(name.encode('utf8'), dns.A, dns.IN),
+            expect=expect, fail=fail,
+        )
 
-    def check_aaaa(self, name: str, expect: list):
-        self._check_query(dns.Query(name.encode('utf8'), dns.AAAA, dns.IN), expect)
+    def check_aaaa(self, name: str, expect=None, fail=False):
+        self._check_query(
+            dns.Query(name.encode('utf8'), dns.AAAA, dns.IN),
+            expect=expect, fail=fail,
+        )
 
-    def check_all(self, name: str, expect: list):
-        self._check_query(dns.Query(name.encode('utf8'), dns.ALL_RECORDS, dns.IN), expect)
+    def check_all(self, name: str, expect=None, fail=False):
+        self._check_query(
+            dns.Query(name.encode('utf8'), dns.ALL_RECORDS, dns.IN),
+            expect=expect, fail=fail,
+        )
 
     def test_resolve(self):
         self.check_a('localhost', iplist('127.0.0.1'))
         self.check_aaaa('localhost', iplist('::1'))
         self.check_all('localhost', iplist('127.0.0.1', '::1'))
         self.check_a('loopback', iplist('127.0.0.1'))
+
+        self.check_a('asdf.asdf', fail=True)
