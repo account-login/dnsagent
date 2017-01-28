@@ -1,6 +1,7 @@
 from ipaddress import IPv4Address, IPv6Address, ip_address
 import socket
 from collections import defaultdict
+import itertools
 from twisted.internet import interfaces, defer
 from twisted.names import client, common, error, dns
 from twisted.python.failure import Failure
@@ -397,3 +398,90 @@ class HostsResolver(common.ResolverBase):
     def lookupPointer(self, name, timeout=None):
         # TODO: ptr
         return defer.fail(NotImplementedError("HostsResolver.lookupPointer"))
+
+
+class CachingResolver(common.ResolverBase):
+    """
+    A resolver that caches the output of another resolver.
+
+    ref: twisted.names.cache.CacheResolver
+    """
+    def __init__(self, resolver, reactor=None):
+        super().__init__()
+
+        self.resolver = resolver
+        if reactor is None:
+            from twisted.internet import reactor
+        self.reactor = reactor
+        self.cache = dict()
+        self.cancel = dict()
+
+    def _lookup(self, name, cls, type_, timeout):
+        def cache_miss(query):
+            logger.debug('cache miss: %s', name.decode('latin1'))
+
+            def add_to_cache(res):
+                self.cache_result(query, res)
+                return res
+            return self.resolver.query(query, timeout=timeout).addCallback(add_to_cache)
+
+        def adjust_ttl(rr: dns.RRHeader, diff):
+            return dns.RRHeader(
+                name=rr.name.name, type=rr.type, cls=rr.cls, ttl=int(rr.ttl - diff),
+                payload=rr.payload,
+            )
+
+        q = dns.Query(name, type_, cls)
+        try:
+            when, (ans, auth, add) = self.cache[q]
+        except KeyError:
+            return cache_miss(q)
+        else:
+            now = self.reactor.seconds()
+            diff = now - when
+            try:
+                result = (
+                    [adjust_ttl(r, diff) for r in ans],
+                    [adjust_ttl(r, diff) for r in auth],
+                    [adjust_ttl(r, diff) for r in add],
+                )
+            except ValueError:
+                # negative ttl
+                return cache_miss(q)
+            else:
+                logger.debug('cache hit: %s', name.decode('latin1'))
+                return defer.succeed(result)
+
+    def cache_result(self, query, payload, cache_time=None):
+        """
+        Cache a DNS entry.
+
+        @param query: a L{dns.Query} instance.
+        @param payload: a 3-tuple of lists of L{dns.RRHeader} records, the
+            matching result of the query (answers, authority and additional).
+        @param cache_time: The time (seconds since epoch) at which the entry is
+            considered to have been added to the cache. If L{None} is given,
+            the current time is used.
+        """
+        minttl = min(
+            map(lambda rr: rr.ttl, itertools.chain.from_iterable(payload)),
+            default=0,
+        )
+
+        logger.debug('adding to cache: %r', query)
+        self.cache[query] = (cache_time or self.reactor.seconds(), payload)
+
+        if query in self.cancel:
+            # reset count down
+            self.cancel[query].cancel()
+        self.cancel[query] = self.reactor.callLater(minttl, self.clear_entry, query)
+
+    def clear_entry(self, query):
+        del self.cache[query]
+        del self.cancel[query]
+
+    def clear(self):
+        for d in self.cancel.values():
+            d.cancel()
+        for query in list(self.cancel.keys()):
+            self.clear_entry(query)

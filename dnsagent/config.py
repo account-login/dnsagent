@@ -3,16 +3,15 @@ from ipaddress import IPv4Address, IPv6Address, AddressValueError
 from collections import namedtuple
 from twisted.names.common import ResolverBase
 from twisted.names.client import Resolver
-from twisted.names.cache import CacheResolver
 from twisted.names.resolve import ResolverChain
 
 from dnsagent.resolver import (
-    ForceTCPResovlver, ParallelResolver, DualResovlver, HostsResolver,
+    ForceTCPResovlver, ParallelResolver, DualResovlver, HostsResolver, CachingResolver,
 )
 from dnsagent.server import TimeoutableDNSServerFactory
 
 
-__all__ = ('chain', 'parallel', 'dual', 'hosts', 'server')
+__all__ = ('chain', 'parallel', 'dual', 'hosts', 'cache', 'server')
 
 
 class InvalidDnsServerString(Exception):
@@ -118,13 +117,17 @@ def hosts(filename=None, *, ttl=5*60, reload=False):
     return HostsResolver(filename, ttl=ttl, reload=reload)
 
 
+def cache(resolver):
+    resolver = _make_resolver(resolver)
+    return chain([CachingResolver(resolver), resolver])
+
+
 class ServerInfo(namedtuple('ServerInfo', 'server port interface'.split())):
     pass
 
 
-def _make_server(resolver, *, cache=True, verbose=5, timeout=None):
+def _make_server(resolver, *, verbose=5, timeout=None):
     return TimeoutableDNSServerFactory(
-        caches=[CacheResolver(verbose=verbose)] if cache else None,
         clients=[resolver],
         verbose=verbose,
         resolve_timeout=timeout,
@@ -133,11 +136,11 @@ def _make_server(resolver, *, cache=True, verbose=5, timeout=None):
 
 def server(
         resolver, *, port=53, interface='127.0.0.1',
-        cache=True, verbose=5, timeout=None
+        verbose=5, timeout=None
 ):
     return ServerInfo(
         _make_server(
-            _make_resolver(resolver), cache=cache, verbose=verbose, timeout=timeout,
+            _make_resolver(resolver), verbose=verbose, timeout=timeout,
         ),
         port,
         interface,
