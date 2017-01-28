@@ -15,7 +15,7 @@ from dnsagent.server import TimeoutableDNSServerFactory
 __all__ = ('chain', 'parallel', 'dual', 'hosts', 'server')
 
 
-class InvalidDnsServerString:
+class InvalidDnsServerString(Exception):
     pass
 
 

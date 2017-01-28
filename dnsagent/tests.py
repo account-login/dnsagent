@@ -1,14 +1,23 @@
+import os
+import tempfile
 from ipaddress import ip_address
+from twisted.internet import defer
+from twisted.names import dns
+from twisted.trial import unittest
 import pytest
 
 from dnsagent.config import (
     parse_dns_server_string, DnsServerInfo, InvalidDnsServerString,
 )
-from dnsagent.resolver import parse_hosts_file
+from dnsagent.resolver import parse_hosts_file, HostsResolver, dns_record_to_ip
 
 
 from dnsagent.__main__ import enable_log
 enable_log()
+
+
+def iplist(*lst):
+    return [ip_address(ip) for ip in lst]
 
 
 def test_parse_dns_server_string():
@@ -39,9 +48,6 @@ def test_parse_dns_server_string():
 
 
 def test_parse_hosts_file():
-    def iplist(*lst):
-        return [ip_address(ip) for ip in lst]
-
     name2ip = parse_hosts_file('''
         127.0.0.1   localhost loopback
         ::1         localhost   # asdf
@@ -62,3 +68,60 @@ def test_parse_hosts_file():
         b=iplist('0.0.0.0'),
         c=iplist('0.0.0.1'),
     )
+
+
+class TestHostsResolver(unittest.TestCase):
+    def setUp(self):
+        self.defereds = []
+        self.hosts_file = None
+
+        hosts_string = '''
+            127.0.0.1   localhost loopback
+            ::1         localhost   # asdf
+        '''
+        self.setup_resolver(hosts_string)
+
+    def tearDown(self):
+        def cleanup(result):
+            os.unlink(self.hosts_file)
+
+        return defer.gatherResults(self.defereds).addBoth(cleanup)
+
+    def setup_resolver(self, hosts_string):
+        fd, self.hosts_file = tempfile.mkstemp(prefix='hosts_', suffix='.txt', text=True)
+        os.write(fd, hosts_string.encode('utf8'))
+        self.resolver = HostsResolver(self.hosts_file, reload=True)
+        os.close(fd)
+
+    def _check_query(self, query: dns.Query, expect):
+        d = defer.Deferred()
+        self.defereds.append(d)
+
+        def check_result(result):
+            try:
+                ans, auth, add = result
+                assert [dns_record_to_ip(rr.payload) for rr in ans] == expect
+            finally:
+                d.callback(None)
+
+        def failed(failure):
+            print('query failed: ', query)
+            print(failure)
+            assert False
+
+        self.resolver.query(query, timeout=[0.5]).addCallbacks(check_result, failed)
+
+    def check_a(self, name: str, expect: list):
+        self._check_query(dns.Query(name.encode('utf8'), dns.A, dns.IN), expect)
+
+    def check_aaaa(self, name: str, expect: list):
+        self._check_query(dns.Query(name.encode('utf8'), dns.AAAA, dns.IN), expect)
+
+    def check_all(self, name: str, expect: list):
+        self._check_query(dns.Query(name.encode('utf8'), dns.ALL_RECORDS, dns.IN), expect)
+
+    def test_resolve(self):
+        self.check_a('localhost', iplist('127.0.0.1'))
+        self.check_aaaa('localhost', iplist('::1'))
+        self.check_all('localhost', iplist('127.0.0.1', '::1'))
+        self.check_a('loopback', iplist('127.0.0.1'))

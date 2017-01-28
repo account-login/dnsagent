@@ -121,6 +121,15 @@ class DualResovlver(common.ResolverBase):
         return output
 
 
+def dns_record_to_ip(record):
+    if isinstance(record, dns.Record_A):
+        return IPv4Address(record.dottedQuad())
+    elif isinstance(record, dns.Record_AAAA):
+        return IPv6Address(socket.inet_ntop(socket.AF_INET6, record.address))
+    else:
+        return None
+
+
 class DualHandler:
     cn4_set = None
     cn6_set = None
@@ -164,12 +173,7 @@ class DualHandler:
         answers, authority, additional = result
         if len(answers) == 1:
             rr = answers[0]  # type: dns.RRHeader
-            ip = None
-            if isinstance(rr.payload, dns.Record_A):
-                ip = IPv4Address(rr.payload.dottedQuad())
-            elif isinstance(rr.payload, dns.Record_AAAA):
-                ip = IPv6Address(socket.inet_ntop(socket.AF_INET6, rr.payload.address))
-
+            ip = dns_record_to_ip(rr.payload)
             if ip is not None and not cls.is_cn_ip(ip):
                 logger.debug('maybe polluted: %s', ip)
                 return True
