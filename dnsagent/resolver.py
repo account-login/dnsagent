@@ -82,22 +82,21 @@ class DeferedHub:
         """
         self.inputs = inputs
         self.output = output
-        self.successed = False
+        self.succeeded = False
         self.errcount = 0
 
         for d in self.inputs:
-            d.addCallback(self.success)
-            d.addErrback(self.fail)
+            d.addCallbacks(self.success, self.fail)
 
     def success(self, result):
-        logger.info('success! sucessed: %s, result: %s', self.successed, result)
-        if not self.successed:
-            self.successed = True
+        logger.info('success! succeeded: %s, result: %s', self.succeeded, result)
+        if not self.succeeded:
+            self.succeeded = True
             self.output.callback(result)
 
     def fail(self, failure):
-        logger.info('fail! sucessed: %s, failure: %s', self.successed, failure)
-        if not self.successed:
+        logger.info('fail! succeeded: %s, failure: %s', self.succeeded, failure)
+        if not self.succeeded:
             self.errcount += 1
             # all failed
             if self.errcount == len(self.inputs):
@@ -122,11 +121,12 @@ class DualResovlver(common.ResolverBase):
         return output
 
 
-def dns_record_to_ip(record):
-    if isinstance(record, dns.Record_A):
-        return IPv4Address(record.dottedQuad())
-    elif isinstance(record, dns.Record_AAAA):
-        return IPv6Address(socket.inet_ntop(socket.AF_INET6, record.address))
+def rrheader_to_ip(rr):
+    payload = rr.payload
+    if isinstance(payload, dns.Record_A):
+        return IPv4Address(payload.dottedQuad())
+    elif isinstance(payload, dns.Record_AAAA):
+        return IPv6Address(socket.inet_ntop(socket.AF_INET6, payload.address))
     else:
         return None
 
@@ -174,7 +174,7 @@ class DualHandler:
         answers, authority, additional = result
         if len(answers) == 1:
             rr = answers[0]  # type: dns.RRHeader
-            ip = dns_record_to_ip(rr.payload)
+            ip = rrheader_to_ip(rr)
             if ip is not None and not cls.is_cn_ip(ip):
                 logger.debug('maybe polluted: %s', ip)
                 return True

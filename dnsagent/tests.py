@@ -12,7 +12,7 @@ from dnsagent.config import (
     parse_dns_server_string, DnsServerInfo, InvalidDnsServerString,
 )
 from dnsagent.resolver import (
-    parse_hosts_file, dns_record_to_ip,
+    parse_hosts_file, rrheader_to_ip,
     HostsResolver, CachingResolver,
 )
 
@@ -129,7 +129,7 @@ class TestResolverBase(unittest.TestCase):
                     self.fail('dns failure expected')
 
                 ans, auth, add = result
-                assert [dns_record_to_ip(rr.payload) for rr in ans] == expect
+                assert [rrheader_to_ip(rr) for rr in ans] == expect
             except:
                 d.callback(False)
                 raise
@@ -222,7 +222,7 @@ class TestCachingResolver(TestResolverBase):
         def check_cached(succ):
             assert succ
             when, (ans, ns, add) = self.resolver.cache[dns.Query(b'asdf', dns.A, dns.IN)]
-            assert dns_record_to_ip(ans[0].payload) == IPv4Address('0.0.0.1')
+            assert rrheader_to_ip(ans[0]) == IPv4Address('0.0.0.1')
             assert len(self.resolver.cancel) == 1
 
             self.fake_resolver.set_answer('asdf', '0.0.0.2', ttl=30)
