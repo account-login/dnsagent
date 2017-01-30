@@ -2,17 +2,15 @@ from ipaddress import IPv4Address, IPv6Address, ip_address
 import socket
 from collections import defaultdict
 import itertools
-from twisted.internet import interfaces, defer
+from twisted.internet import defer
 from twisted.names import client, common, error, dns
 from twisted.python.failure import Failure
-from zope.interface import implementer
 from iprir.ipset import IpSet
 
 from dnsagent import logger
 from dnsagent.watcher import watch_modification
 
 
-@implementer(interfaces.IResolver)
 class ForceTCPResovlver(client.Resolver):
     def queryUDP(self, queries, timeout=None):
         if timeout is None:
@@ -20,7 +18,6 @@ class ForceTCPResovlver(client.Resolver):
         return self.queryTCP(queries, timeout[0])
 
 
-@implementer(interfaces.IResolver)
 class ParallelResolver(common.ResolverBase):
     """
     Lookup an address using multiple L{IResolver}s in parallel.
@@ -106,7 +103,6 @@ class DeferedHub:
                 self.output.errback(failure)
 
 
-@implementer(interfaces.IResolver)
 class DualResovlver(common.ResolverBase):
     def __init__(self, cn_resolver, ab_resolver):
         super().__init__()
