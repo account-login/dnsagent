@@ -13,7 +13,7 @@ from dnsagent.config import (
 )
 from dnsagent.resolver import (
     parse_hosts_file, rrheader_to_ip,
-    HostsResolver, CachingResolver,
+    HostsResolver, CachingResolver, ParallelResolver,
 )
 
 
@@ -26,15 +26,27 @@ def iplist(*lst):
 
 
 class FakeResolver(ResolverBase):
-    def __init__(self, map=None):
+    def __init__(self, reactor=None):
         super().__init__()
-        self.map = map or dict()
+        self.delay = 0
+        self.map = dict()
+        if reactor is None:
+            from twisted.internet import reactor
+        self.reactor = reactor
 
     def _lookup(self, name, cls, type_, timeout):
+        def cleanup():
+            delay_d.cancel()
+
+        d = defer.Deferred(lambda ignore: cleanup())
         try:
-            return defer.succeed(self.map[name, cls, type_])
+            result = self.map[name, cls, type_]
         except KeyError:
-            return defer.fail(Failure(dns.DomainError(name)))
+            err = Failure(dns.DomainError(name))
+            delay_d = self.reactor.callLater(self.delay, d.errback, err)
+        else:
+            delay_d = self.reactor.callLater(self.delay, d.callback, result)
+        return d
 
     def set_answer(self, name: str, address: str, ttl=60):
         rr = make_rrheader(name, address, ttl=ttl)
@@ -240,6 +252,43 @@ class TestCachingResolver(TestResolverBase):
             assert len(self.resolver.cache) == len(self.resolver.cancel) == 0
 
         self.check_a('asdf', iplist('0.0.0.1')).addCallback(check_cached)
+
+
+class TestParallelResolver(TestResolverBase):
+    def setUp(self):
+        super().setUp()
+        self.upstreams = [FakeResolver(), FakeResolver()]
+        self.resolver = ParallelResolver(self.upstreams)
+
+    def setup_upstream(self, index, addr, delay):
+        self.upstreams[index].set_answer('asdf', addr)
+        self.upstreams[index].delay = delay
+
+    def test_resolve_1(self):
+        self.setup_upstream(0, '0.0.0.1', 0.01)
+        self.setup_upstream(1, '0.0.0.2', 0.02)
+        self.check_a('asdf', iplist('0.0.0.1'))
+
+    def test_resolve_2(self):
+        self.setup_upstream(0, '0.0.0.1', 0.02)
+        self.setup_upstream(1, '0.0.0.2', 0.01)
+        self.check_a('asdf', iplist('0.0.0.2'))
+
+    def test_partial_fail_1(self):
+        self.setup_upstream(0, '1.1.1.1', 0.02)
+        self.upstreams[1].delay = 0.01
+        self.check_a('asdf', iplist('1.1.1.1'))
+
+    def test_partial_fail_2(self):
+        self.setup_upstream(1, '1.1.1.2', 0.02)
+        self.upstreams[0].delay = 0.01
+        self.check_a('asdf', iplist('1.1.1.2'))
+
+    def test_all_fail(self):
+        self.upstreams[0].delay = 0.01
+        self.upstreams[1].delay = 0.02
+
+        self.check_a('asdfasdf', fail=True)
 
 
 del TestResolverBase

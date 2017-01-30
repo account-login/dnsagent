@@ -93,6 +93,9 @@ class DeferedHub:
         if not self.succeeded:
             self.succeeded = True
             self.output.callback(result)
+            # cancel other attempts
+            for d in self.inputs:
+                d.cancel()
 
     def fail(self, failure):
         logger.info('fail! succeeded: %s, failure: %s', self.succeeded, failure)
