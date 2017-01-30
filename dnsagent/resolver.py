@@ -255,25 +255,23 @@ def validate_domain_name(name: str):
 
 
 def parse_hosts_file(lines):
-    lineno, line = None, None
-
-    def bad_line():
+    def bad_line(lineno, line):
         logger.error('bad host file. line %d, %r', lineno, line)
 
     name2ip = defaultdict(list)
     for lineno, line in enumerate(lines):
         line = line.partition('#')[0].strip()
         if line:
-            # FIXME: distinguish between canonical name and aliases
+            # TODO: distinguish between canonical name and aliases
             ip, *domains = line.split()
             if not domains:
-                bad_line()
+                bad_line(lineno, line)
                 continue
 
             try:
                 ipobj = ip_address(ip)
             except ValueError:
-                bad_line()
+                bad_line(lineno, line)
                 continue
 
             for do in domains:
