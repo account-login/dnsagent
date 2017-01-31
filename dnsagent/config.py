@@ -122,7 +122,7 @@ def cache(resolver):
     return chain([CachingResolver(resolver), resolver])
 
 
-class ServerInfo(namedtuple('ServerInfo', 'server port interface'.split())):
+class ServerInfo(namedtuple('ServerInfo', 'server binds'.split())):
     pass
 
 
@@ -135,13 +135,21 @@ def _make_server(resolver, *, verbose=5, timeout=None):
 
 
 def server(
-        resolver, *, port=53, interface='127.0.0.1',
+        resolver, *, port=None, interface=None, binds=None,
         verbose=5, timeout=None
 ):
+    if binds is None:
+        if port is None:
+            port = 53
+        if interface is None:
+            interface = '127.0.0.1'
+        binds = [(interface, port)]
+    else:
+        assert port is interface is None
+
     return ServerInfo(
         _make_server(
             _make_resolver(resolver), verbose=verbose, timeout=timeout,
         ),
-        port,
-        interface,
+        binds,
     )

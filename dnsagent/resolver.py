@@ -11,6 +11,14 @@ from dnsagent import logger
 from dnsagent.watcher import watch_modification
 
 
+# TODO: round robin
+# TODO: edns_client_subnet
+# TODO: dns over https: https://developers.google.com/speed/public-dns/docs/dns-over-https
+# TODO: persistant tcp connection
+# TODO: socks5 proxy
+# TODO: dispaching based on input
+
+
 class ForceTCPResovlver(client.Resolver):
     def queryUDP(self, queries, timeout=None):
         if timeout is None:

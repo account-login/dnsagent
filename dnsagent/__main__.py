@@ -19,8 +19,7 @@ def eval_config_file(filename):
 class App:
     def __init__(self, reactor):
         self.reactor = reactor
-        self.udp_port = None
-        self.tcp_port = None
+        self.ports = []
         self._is_running = False
 
     @property
@@ -30,27 +29,28 @@ class App:
     def start(self, server_info):
         assert not self._is_running
         logger.info('starting server: %s', server_info)
-        port, interface, factory, protocol = self._extract_server_info(server_info)
-        self._start_udp(port, protocol, interface)
-        self._start_tcp(port, factory, interface)
+        self._start(server_info)
         logger.info('started')
         self._is_running = True
 
-    @staticmethod
-    def _extract_server_info(server_info):
-        port = server_info.port
-        interface = server_info.interface
+    def _start(self, server_info):
+        binds = server_info.binds
+        self.ports.clear()
         factory = server_info.server
-        protocol = DNSDatagramProtocol(controller=factory)
-        return port, interface, factory, protocol
+        for interface, port in binds:
+            protocol = DNSDatagramProtocol(controller=factory)
+            self.ports.append(self._start_udp(port, protocol, interface))
+            self.ports.append(self._start_tcp(port, factory, interface))
 
     def _start_udp(self, port, protocol, interface):
-        self.udp_port = self.reactor.listenUDP(port, protocol, interface=interface)
-        logger.info('listening udp port %s', self.udp_port.port)
+        udp_port = self.reactor.listenUDP(port, protocol, interface=interface)
+        logger.info('listening udp port %s', port)
+        return udp_port
 
     def _start_tcp(self, port, factory, interface):
-        self.tcp_port = self.reactor.listenTCP(port, factory, interface=interface)
-        logger.info('listening tcp port %s', self.tcp_port.port)
+        tcp_port = self.reactor.listenTCP(port, factory, interface=interface)
+        logger.info('listening tcp port %s', port)
+        return tcp_port
 
     def restart(self, server_info):
         assert self._is_running
@@ -58,13 +58,10 @@ class App:
         self.reactor.callFromThread(self._restart, server_info)
 
     def _restart(self, server_info):
-        port, interface, factory, protocol = self._extract_server_info(server_info)
-        defer.maybeDeferred(self.udp_port.stopListening).addBoth(
-            lambda ignore: self._start_udp(port, protocol, interface)
-        )
-        defer.maybeDeferred(self.tcp_port.stopListening).addBoth(
-            lambda ignore: self._start_tcp(port, factory, interface)
-        )
+        defer.DeferredList(
+            [ defer.maybeDeferred(port.stopListening) for port in self.ports ],
+            consumeErrors=True,
+        ).addBoth(lambda ignore: self._start(server_info))
 
 
 class ConfigLoader:
@@ -104,13 +101,13 @@ class ConfigLoader:
         return True
 
 
-def main():
+def main(args=None):
     ap = ArgumentParser(prog='dnsagent', description='A configurable dns proxy')
     ap.add_argument('-c', '--config', required=True, help='configuration file')
     ap.add_argument(
         '-r', '--reload', action='store_true',
         help='automatically reload configuration file')
-    option = ap.parse_args()
+    option = ap.parse_args(args=args)
 
     # Output twisted messages to Python standard library logging module.
     log.PythonLoggingObserver().start()
