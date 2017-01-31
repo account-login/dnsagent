@@ -1,23 +1,27 @@
 import os
 import tempfile
+import random
 from ipaddress import ip_address, IPv4Address, IPv6Address
 from twisted.internet import defer, task
+from twisted.internet.error import CannotListenError
 from twisted.names import dns
 from twisted.names.common import ResolverBase
+from twisted.names.client import Resolver
 from twisted.python.failure import Failure
 from twisted.trial import unittest
 import pytest
 
 from dnsagent.config import (
-    parse_dns_server_string, DnsServerInfo, InvalidDnsServerString,
+    parse_dns_server_string, DnsServerInfo, InvalidDnsServerString, ServerInfo
 )
 from dnsagent.resolver import (
     parse_hosts_file, rrheader_to_ip,
     HostsResolver, CachingResolver, ParallelResolver,
 )
+from dnsagent.server import TimeoutableDNSServerFactory
+from dnsagent.app import App, enable_log
 
 
-from dnsagent.__main__ import enable_log
 enable_log()
 
 
@@ -288,6 +292,45 @@ class TestParallelResolver(TestResolverBase):
         self.upstreams[0].delay = 0.01
         self.upstreams[1].delay = 0.02
 
+        self.check_a('asdfasdf', fail=True)
+
+
+class TestApp(TestResolverBase):
+    def setUp(self):
+        super().setUp()
+        self.apps = []
+
+    def tearDown(self):
+        d = defer.Deferred()
+        super().tearDown().addBoth(lambda ignore: self.clean_apps(d))
+        return d
+
+    def clean_apps(self, final: defer.Deferred):
+        return defer.gatherResults(
+            [ app.stop() for app in self.apps ]).addBoth(lambda ignore: final.callback(None))
+
+    def set_resolver(self, resolver):
+        server = TimeoutableDNSServerFactory(clients=[resolver])
+        app = App()
+        self.apps.append(app)
+        for i in range(10):
+            port = random.randrange(1024, 60000)
+            try:
+                app.start(ServerInfo(server, [('', port)]))
+            except CannotListenError:
+                pass
+            else:
+                self.resolver = Resolver(servers=[('127.0.0.1', port)])
+                return app
+
+        self.fail('get_app() failed.')
+
+    def test_basic(self):
+        fake_resolver = FakeResolver()
+        fake_resolver.set_answer('asdf', '1.1.1.1')
+        self.set_resolver(fake_resolver)
+
+        self.check_a('asdf', iplist('1.1.1.1'))
         self.check_a('asdfasdf', fail=True)
 
 

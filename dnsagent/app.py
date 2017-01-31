@@ -17,7 +17,9 @@ def eval_config_file(filename):
 
 
 class App:
-    def __init__(self, reactor):
+    def __init__(self, reactor=None):
+        if reactor is None:
+            from twisted.internet import reactor
         self.reactor = reactor
         self.ports = []
         self._is_running = False
@@ -57,11 +59,14 @@ class App:
         logger.info('restarting: %s', server_info)
         self.reactor.callFromThread(self._restart, server_info)
 
-    def _restart(self, server_info):
-        defer.DeferredList(
+    def stop(self):
+        return defer.DeferredList(
             [ defer.maybeDeferred(port.stopListening) for port in self.ports ],
             consumeErrors=True,
-        ).addBoth(lambda ignore: self._start(server_info))
+        )
+
+    def _restart(self, server_info):
+        self.stop().addBoth(lambda ignore: self._start(server_info))
 
 
 class ConfigLoader:
