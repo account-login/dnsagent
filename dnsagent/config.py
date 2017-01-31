@@ -111,7 +111,7 @@ def dual(cn, ab):
 def hosts(filename=None, *, ttl=5*60, reload=False):
     if filename is None:
         if os.name == 'nt':
-            filename = os.path.join(os.environ['SYSTEMROOT'], 'system32/driver/etc/hosts')
+            filename = os.path.join(os.environ['SYSTEMROOT'], 'system32/drivers/etc/hosts')
         else:
             filename = '/etc/hosts'
     return HostsResolver(filename, ttl=ttl, reload=reload)
