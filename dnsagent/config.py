@@ -11,7 +11,7 @@ from dnsagent.resolver import (
 from dnsagent.server import TimeoutableDNSServerFactory
 
 
-__all__ = ('chain', 'parallel', 'dual', 'hosts', 'cache', 'server')
+__all__ = ('make_resolver', 'chain', 'parallel', 'dual', 'hosts', 'cache', 'server')
 
 
 class InvalidDnsServerString(Exception):
@@ -82,7 +82,7 @@ def parse_dns_server_string(string: str) -> DnsServerInfo:
     return DnsServerInfo(proto, host, port)
 
 
-def _make_resolver(arg):
+def make_resolver(arg):
     if isinstance(arg, str):
         server_info = parse_dns_server_string(arg)
         if server_info.proto == 'tcp':
@@ -95,16 +95,16 @@ def _make_resolver(arg):
 
 
 def chain(resolvers):
-    return ResolverChain([_make_resolver(res) for res in resolvers])
+    return ResolverChain([make_resolver(res) for res in resolvers])
 
 
 def parallel(resolvers):
-    return ParallelResolver([_make_resolver(res) for res in resolvers])
+    return ParallelResolver([make_resolver(res) for res in resolvers])
 
 
 def dual(cn, ab):
-    cn = _make_resolver(cn)
-    ab = _make_resolver(ab)
+    cn = make_resolver(cn)
+    ab = make_resolver(ab)
     return DualResovlver(cn, ab)
 
 
@@ -118,7 +118,7 @@ def hosts(filename=None, *, ttl=5*60, reload=False):
 
 
 def cache(resolver):
-    resolver = _make_resolver(resolver)
+    resolver = make_resolver(resolver)
     return chain([CachingResolver(resolver), resolver])
 
 
@@ -149,7 +149,7 @@ def server(
 
     return ServerInfo(
         _make_server(
-            _make_resolver(resolver), verbose=verbose, timeout=timeout,
+            make_resolver(resolver), verbose=verbose, timeout=timeout,
         ),
         binds,
     )
