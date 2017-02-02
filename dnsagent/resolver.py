@@ -3,7 +3,11 @@ import socket
 from collections import defaultdict
 import itertools
 from twisted.internet import defer
-from twisted.names import client, common, error, dns
+from twisted.names import dns
+from twisted.names.error import DomainError
+from twisted.names.common import ResolverBase
+from twisted.names.client import Resolver as OriginResolver
+from twisted.names.resolve import ResolverChain as OriginResolverChain
 from twisted.python.failure import Failure
 from iprir.ipset import IpSet
 
@@ -19,14 +23,175 @@ from dnsagent.watcher import watch_modification
 # TODO: dispaching based on input
 
 
-class ForceTCPResovlver(client.Resolver):
+class MyBaseResolver(ResolverBase):
+    """
+    Add kwargs to query() method, so additional information
+    can by passed to resolver and sub-resovler.
+    """
+    def query(self, query, timeout=None, **kwargs):
+        request_id = kwargs.get('request_id', -1)
+        logger.info('[%d]%s.query(%r)', request_id, self.__class__.__name__, query)
+        try:
+            method = self.typeToMethod[query.type]
+        except KeyError:
+            return defer.fail(
+                Failure(NotImplementedError(self.__class__ + " " + str(query.type))))
+        else:
+            return defer.maybeDeferred(method, query.name.name, timeout, **kwargs)
+
+    def _lookup(self, name, cls, type, timeout, **kwargs):
+        return defer.fail(NotImplementedError("ResolverBase._lookup"))
+
+    def lookupAddress(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.A, timeout=timeout, **kwargs)
+
+    def lookupIPV6Address(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.AAAA, timeout=timeout, **kwargs)
+
+    def lookupAddress6(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.A6, timeout=timeout, **kwargs)
+
+    def lookupMailExchange(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.MX, timeout=timeout, **kwargs)
+
+    def lookupNameservers(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.NS, timeout=timeout, **kwargs)
+
+    def lookupCanonicalName(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.CNAME, timeout=timeout, **kwargs)
+
+    def lookupMailBox(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.MB, timeout=timeout, **kwargs)
+
+    def lookupMailGroup(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.MG, timeout=timeout, **kwargs)
+
+    def lookupMailRename(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.MR, timeout=timeout, **kwargs)
+
+    def lookupPointer(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.PTR, timeout=timeout, **kwargs)
+
+    def lookupAuthority(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.SOA, timeout=timeout, **kwargs)
+
+    def lookupNull(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.NULL, timeout=timeout, **kwargs)
+
+    def lookupWellKnownServices(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.WKS, timeout=timeout, **kwargs)
+
+    def lookupService(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.SRV, timeout=timeout, **kwargs)
+
+    def lookupHostInfo(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.HINFO, timeout=timeout, **kwargs)
+
+    def lookupMailboxInfo(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.MINFO, timeout=timeout, **kwargs)
+
+    def lookupText(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.TXT, timeout=timeout, **kwargs)
+
+    def lookupSenderPolicy(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.SPF, timeout=timeout, **kwargs)
+
+    def lookupResponsibility(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.RP, timeout=timeout, **kwargs)
+
+    def lookupAFSDatabase(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.AFSDB, timeout=timeout, **kwargs)
+
+    def lookupZone(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.AXFR, timeout=timeout, **kwargs)
+
+    def lookupNamingAuthorityPointer(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.NAPTR, timeout=timeout, **kwargs)
+
+    def lookupAllRecords(self, name, timeout=None, **kwargs):
+        return self._lookup(name, dns.IN, dns.ALL_RECORDS, timeout=timeout, **kwargs)
+
+
+def patch_resolver(cls):
+    for k, v in MyBaseResolver.__dict__.items():
+        if k.startswith('lookup') or k in ('query', '_lookup'):
+            if k not in cls.__dict__:
+                setattr(cls, k, v)
+
+    return cls
+
+
+@patch_resolver
+class Resolver(OriginResolver):
+    def _lookup(self, name, cls, type, timeout, **kwargs):
+        return super()._lookup(name, cls, type, timeout=timeout)
+
+    def __repr__(self):
+        ip, port = self.servers[0]
+        cls = self.__class__.__name__
+        return '<{cls} {ip}:{port}>'.format_map(locals())
+
+
+class TCPResovlver(Resolver):
     def queryUDP(self, queries, timeout=None):
         if timeout is None:
             timeout = [10]
         return self.queryTCP(queries, timeout[0])
 
 
-class ParallelResolver(common.ResolverBase):
+@patch_resolver
+class ChainedResolver(OriginResolverChain):
+    def _lookup(self, name, cls, type, timeout, **kwargs):
+        """
+        Build a L{dns.Query} for the given parameters and dispatch it
+        to each L{IResolver} in C{self.resolvers} until an answer or
+        L{error.AuthoritativeDomainError} is returned.
+
+        @type name: C{str}
+        @param name: DNS name to resolve.
+
+        @type type: C{int}
+        @param type: DNS record type.
+
+        @type cls: C{int}
+        @param cls: DNS record class.
+
+        @type timeout: Sequence of C{int}
+        @param timeout: Number of seconds after which to reissue the query.
+            When the last timeout expires, the query is considered failed.
+
+        @rtype: L{Deferred}
+        @return: A L{Deferred} which fires with a three-tuple of lists of
+            L{twisted.names.dns.RRHeader} instances.  The first element of the
+            tuple gives answers.  The second element of the tuple gives
+            authorities.  The third element of the tuple gives additional
+            information.  The L{Deferred} may instead fail with one of the
+            exceptions defined in L{twisted.names.error} or with
+            C{NotImplementedError}.
+        """
+        if not self.resolvers:
+            return defer.fail(DomainError())
+        q = dns.Query(name, type, cls)
+        d = self.resolvers[0].query(q, timeout, **kwargs)
+        for r in self.resolvers[1:]:
+            d = d.addErrback(ChainedFailureHandler(r.query, q, timeout, **kwargs))
+        return d
+
+
+class ChainedFailureHandler:
+    def __init__(self, resolver, query, timeout, **kwargs):
+        self.resolver = resolver
+        self.query = query
+        self.timeout = timeout
+        self.kwargs = kwargs
+
+    def __call__(self, failure):
+        # AuthoritativeDomainErrors should halt resolution attempts
+        failure.trap(dns.DomainError, defer.TimeoutError, NotImplementedError)
+        return self.resolver(self.query, self.timeout, **self.kwargs)
+
+
+class ParallelResolver(MyBaseResolver):
     """
     Lookup an address using multiple L{IResolver}s in parallel.
     """
@@ -38,7 +203,7 @@ class ParallelResolver(common.ResolverBase):
         super().__init__()
         self.resolvers = resolvers
 
-    def _lookup(self, name, cls, type_, timeout):
+    def _lookup(self, name, cls, type_, timeout, **kwargs):
         """
         Build a L{dns.Query} for the given parameters and dispatch it
         to each L{IResolver} in C{self.resolvers} until an answer or
@@ -67,10 +232,10 @@ class ParallelResolver(common.ResolverBase):
             C{NotImplementedError}.
         """
         if not self.resolvers:
-            return defer.fail(error.DomainError())
+            return defer.fail(DomainError())
 
         q = dns.Query(name, type_, cls)
-        dl = [ res.query(q, timeout=timeout) for res in self.resolvers ]
+        dl = [ res.query(q, timeout=timeout, **kwargs) for res in self.resolvers ]
         return make_paralleled_defered(dl)
 
 
@@ -111,18 +276,18 @@ class DeferedHub:
                 self.output.errback(failure)
 
 
-class DualResovlver(common.ResolverBase):
+class DualResovlver(MyBaseResolver):
     def __init__(self, cn_resolver, ab_resolver):
         super().__init__()
         self.cn_resolver = cn_resolver
         self.ab_resolver = ab_resolver
 
-    def _lookup(self, name, cls, type_, timeout):
+    def _lookup(self, name, cls, type_, timeout, **kwargs):
         q = dns.Query(name, type_, cls)
         output = defer.Deferred()
         DualHandler(
-            self.cn_resolver.query(q, timeout=timeout),
-            self.ab_resolver.query(q, timeout=timeout),
+            self.cn_resolver.query(q, timeout=timeout, **kwargs),
+            self.ab_resolver.query(q, timeout=timeout, **kwargs),
             output,
         )
         return output
@@ -295,7 +460,7 @@ def read_hosts_file(filename: str):
         return parse_hosts_file(fp)
 
 
-class HostsResolver(common.ResolverBase):
+class HostsResolver(MyBaseResolver):
     """
     A resolver that services hosts(5) format files.
 
@@ -381,31 +546,31 @@ class HostsResolver(common.ResolverBase):
         else:
             return defer.fail(Failure(dns.DomainError(name)))
 
-    def lookupAddress(self, name, timeout=None):
+    def lookupAddress(self, name, timeout=None, **kwargs):
         """
         Return any IPv4 addresses from C{self.d2ip} as L{Record_A} instances.
         """
         return self._respond(name, self._get_a_records(name))
 
-    def lookupIPV6Address(self, name, timeout=None):
+    def lookupIPV6Address(self, name, timeout=None, **kwargs):
         """
         Return any IPv6 addresses from C{self.d2ip} as L{Record_AAAA} instances.
         """
         return self._respond(name, self._get_aaaa_records(name))
 
-    def lookupAllRecords(self, name, timeout=None):
+    def lookupAllRecords(self, name, timeout=None, **kwargs):
         """
         Return any addresses from C{self.d2ip} as either
         L{Record_AAAA} or L{Record_A} instances.
         """
         return self._respond(name, self._get_all_records(name))
 
-    def lookupPointer(self, name, timeout=None):
+    def lookupPointer(self, name, timeout=None, **kwargs):
         # TODO: ptr
         return defer.fail(NotImplementedError("HostsResolver.lookupPointer"))
 
 
-class CachingResolver(common.ResolverBase):
+class CachingResolver(MyBaseResolver):
     """
     A resolver that caches the output of another resolver.
 
@@ -421,14 +586,17 @@ class CachingResolver(common.ResolverBase):
         self.cache = dict()
         self.cancel = dict()
 
-    def _lookup(self, name, cls, type_, timeout):
+    def _lookup(self, name, cls, type_, timeout, **kwargs):
+        # TODO: queue equivant query
         def cache_miss(query):
             logger.debug('cache miss: %s', name.decode('latin1'))
 
             def add_to_cache(res):
                 self.cache_result(query, res)
                 return res
-            return self.resolver.query(query, timeout=timeout).addCallback(add_to_cache)
+
+            d = self.resolver.query(query, timeout=timeout, **kwargs)
+            return d.addCallback(add_to_cache)
 
         def adjust_ttl(rr: dns.RRHeader, diff):
             return dns.RRHeader(

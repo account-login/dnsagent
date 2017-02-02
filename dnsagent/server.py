@@ -1,14 +1,13 @@
-from twisted.names import server
+from twisted.names.server import DNSServerFactory
+from twisted.names import dns
 
 from dnsagent import logger
 
 
-class TimeoutableDNSServerFactory(server.DNSServerFactory):
-    def __init__(
-            self, authorities=None, caches=None, clients=None, verbose=0,
-            resolve_timeout=None,
-    ):
-        super().__init__(authorities=authorities, caches=caches, clients=clients, verbose=verbose)
+class MyDNSServerFactory(DNSServerFactory):
+    def __init__(self, resolver, resolve_timeout=None, verbose=0):
+        super().__init__(clients=[resolver], verbose=verbose)
+        self.resolver = resolver    # overide resolver
         self.resolve_timeout = resolve_timeout or [5]
 
     def handleQuery(self, message, protocol, address):
@@ -45,10 +44,12 @@ class TimeoutableDNSServerFactory(server.DNSServerFactory):
         @rtype: L{Deferred<twisted.internet.defer.Deferred>}
         # """
 
-        logger.info('handleQuery: %s, from %s', message.queries[0], address)
+        logger.info('handleQuery(%r), from %s', message.queries[0], address)
         query = message.queries[0]
-        return self.resolver.query(query, timeout=self.resolve_timeout).addCallback(
-            self.gotResolverResponse, protocol, message, address
+        print(self.resolver.query)
+        d = self.resolver.query(query, timeout=self.resolve_timeout, request_id=message.id)
+        return d.addCallback(
+            self.gotResolverResponse, protocol, message, address,
         ).addErrback(
-            self.gotResolverError, protocol, message, address
+            self.gotResolverError, protocol, message, address,
         )

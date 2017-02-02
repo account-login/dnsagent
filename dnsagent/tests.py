@@ -5,8 +5,6 @@ from ipaddress import ip_address, IPv4Address, IPv6Address
 from twisted.internet import defer, task
 from twisted.internet.error import CannotListenError
 from twisted.names import dns
-from twisted.names.common import ResolverBase
-from twisted.names.client import Resolver
 from twisted.python.failure import Failure
 from twisted.trial import unittest
 import pytest
@@ -16,9 +14,9 @@ from dnsagent.config import (
 )
 from dnsagent.resolver import (
     parse_hosts_file, rrheader_to_ip,
-    HostsResolver, CachingResolver, ParallelResolver,
+    MyBaseResolver, Resolver, HostsResolver, CachingResolver, ParallelResolver,
 )
-from dnsagent.server import TimeoutableDNSServerFactory
+from dnsagent.server import MyDNSServerFactory
 from dnsagent.app import App, enable_log
 
 
@@ -29,7 +27,7 @@ def iplist(*lst):
     return [ip_address(ip) for ip in lst]
 
 
-class FakeResolver(ResolverBase):
+class FakeResolver(MyBaseResolver):
     def __init__(self, reactor=None):
         super().__init__()
         self.delay = 0
@@ -38,7 +36,7 @@ class FakeResolver(ResolverBase):
             from twisted.internet import reactor
         self.reactor = reactor
 
-    def _lookup(self, name, cls, type_, timeout):
+    def _lookup(self, name, cls, type_, timeout, **kwargs):
         def cleanup():
             delay_d.cancel()
 
@@ -310,7 +308,7 @@ class TestApp(TestResolverBase):
             [ app.stop() for app in self.apps ]).addBoth(lambda ignore: final.callback(None))
 
     def set_resolver(self, resolver):
-        server = TimeoutableDNSServerFactory(clients=[resolver])
+        server = MyDNSServerFactory(resolver=resolver)
         app = App()
         self.apps.append(app)
         for i in range(10):

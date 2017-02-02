@@ -2,13 +2,12 @@ import os
 from ipaddress import IPv4Address, IPv6Address, AddressValueError
 from collections import namedtuple
 from twisted.names.common import ResolverBase
-from twisted.names.client import Resolver
-from twisted.names.resolve import ResolverChain
 
 from dnsagent.resolver import (
-    ForceTCPResovlver, ParallelResolver, DualResovlver, HostsResolver, CachingResolver,
+    Resolver, TCPResovlver, ParallelResolver, ChainedResolver,
+    DualResovlver, HostsResolver, CachingResolver,
 )
-from dnsagent.server import TimeoutableDNSServerFactory
+from dnsagent.server import MyDNSServerFactory
 
 
 __all__ = ('make_resolver', 'chain', 'parallel', 'dual', 'hosts', 'cache', 'server')
@@ -86,7 +85,7 @@ def make_resolver(arg):
     if isinstance(arg, str):
         server_info = parse_dns_server_string(arg)
         if server_info.proto == 'tcp':
-            return ForceTCPResovlver(servers=[(server_info.host, server_info.port)])
+            return TCPResovlver(servers=[(server_info.host, server_info.port)])
         else:
             return Resolver(servers=[(server_info.host, server_info.port)])
     else:
@@ -95,7 +94,7 @@ def make_resolver(arg):
 
 
 def chain(resolvers):
-    return ResolverChain([make_resolver(res) for res in resolvers])
+    return ChainedResolver([make_resolver(res) for res in resolvers])
 
 
 def parallel(resolvers):
@@ -127,11 +126,7 @@ class ServerInfo(namedtuple('ServerInfo', 'server binds'.split())):
 
 
 def _make_server(resolver, *, verbose=5, timeout=None):
-    return TimeoutableDNSServerFactory(
-        clients=[resolver],
-        verbose=verbose,
-        resolve_timeout=timeout,
-    )
+    return MyDNSServerFactory(resolver=resolver, verbose=verbose, resolve_timeout=timeout)
 
 
 def server(
