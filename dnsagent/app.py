@@ -6,7 +6,7 @@ from twisted.names.dns import DNSDatagramProtocol
 from twisted.python import log
 
 from dnsagent import logger
-from dnsagent.watcher import watch_modification
+from dnsagent.utils import watch_modification
 
 
 def eval_config_file(filename):

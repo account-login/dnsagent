@@ -12,7 +12,7 @@ from twisted.python.failure import Failure
 from iprir.ipset import IpSet
 
 from dnsagent import logger
-from dnsagent.watcher import watch_modification
+from dnsagent.utils import watch_modification, PrefixedLogger
 
 
 # TODO: round robin
@@ -21,6 +21,8 @@ from dnsagent.watcher import watch_modification
 # TODO: persistant tcp connection
 # TODO: socks5 proxy
 # TODO: dispaching based on input
+# TODO: log to file
+# TODO: improve log msg
 
 
 class MyBaseResolver(ResolverBase):
@@ -30,7 +32,7 @@ class MyBaseResolver(ResolverBase):
     """
     def query(self, query, timeout=None, **kwargs):
         request_id = kwargs.get('request_id', -1)
-        logger.info('[%d]%s.query(%r)', request_id, self.__class__.__name__, query)
+        logger.info('[%d]%r.query(%r)', request_id, self, query)
         try:
             method = self.typeToMethod[query.type]
         except KeyError:
@@ -177,6 +179,10 @@ class ChainedResolver(OriginResolverChain):
             d = d.addErrback(ChainedFailureHandler(r.query, q, timeout, **kwargs))
         return d
 
+    def __repr__(self):
+        sub = '|'.join(map(repr, self.resolvers))
+        return '<Chain {}>'.format(sub)
+
 
 class ChainedFailureHandler:
     def __init__(self, resolver, query, timeout, **kwargs):
@@ -235,43 +241,57 @@ class ParallelResolver(MyBaseResolver):
             return defer.fail(DomainError())
 
         q = dns.Query(name, type_, cls)
-        dl = [ res.query(q, timeout=timeout, **kwargs) for res in self.resolvers ]
-        return make_paralleled_defered(dl)
+        d = defer.Deferred()
+        ResolverHub(q, timeout, self.resolvers, d, **kwargs)
+        return d
+
+    def __repr__(self):
+        sub = '|'.join(map(repr, self.resolvers))
+        return '<Parallel {}>'.format(sub)
 
 
-def make_paralleled_defered(inputs):
-    d = defer.Deferred()
-    DeferedHub(inputs, d)
-    return d
-
-
-class DeferedHub:
-    def __init__(self, inputs, output: defer.Deferred):
-        """
-        :type inputs: list[defer.Deferred]
-        """
-        self.inputs = inputs
+class ResolverHub:
+    def __init__(self, query, timeout, resolvers, output: defer.Deferred, **kwargs):
+        self.resolvers = resolvers
+        self.inputs = []
         self.output = output
         self.succeeded = False
         self.errcount = 0
 
-        for d in self.inputs:
-            d.addCallbacks(self.success, self.fail)
+        log_prefix = '[%d]' % kwargs.get('request_id', -1)
+        self.logger = PrefixedLogger(logger, log_prefix)
 
-    def success(self, result):
-        logger.info('success! succeeded: %s, result: %s', self.succeeded, result)
+        for res in resolvers:
+            d = res.query(query, timeout=timeout, **kwargs)
+            d.addCallbacks(
+                callback=self.success, callbackArgs=[res],
+                errback=self.fail, errbackArgs=[res],
+            )
+            self.inputs.append(d)
+
+    def success(self, result, resolver):
+        self.logger.info(
+            'success! %r, succeeded: %s, result: %s',
+            resolver, self.succeeded, result)
         if not self.succeeded:
             self.succeeded = True
             self.output.callback(result)
             # cancel other attempts
-            for d in self.inputs:
-                d.cancel()
+            for d, res in zip(self.inputs, self.resolvers):
+                if res is not resolver:
+                    d.cancel()
 
-    def fail(self, failure):
-        logger.info('fail! succeeded: %s, failure: %s', self.succeeded, failure)
+    def fail(self, failure: Failure, resolver):
+        if isinstance(failure.value, defer.CancelledError):
+            self.logger.info('canceled! %r', resolver)
+        else:
+            self.logger.info(
+                'fail! %r, succeeded: %s, failure: %s',
+                resolver, self.succeeded, failure)
         if not self.succeeded:
             self.errcount += 1
             # all failed
+            self.logger.info('all fail! %r', self.resolvers)
             if self.errcount == len(self.inputs):
                 self.output.errback(failure)
 
@@ -288,9 +308,12 @@ class DualResovlver(MyBaseResolver):
         DualHandler(
             self.cn_resolver.query(q, timeout=timeout, **kwargs),
             self.ab_resolver.query(q, timeout=timeout, **kwargs),
-            output,
+            output, **kwargs
         )
         return output
+
+    def __repr__(self):
+        return '<Dual cn={} ab={}>'.format(self.cn_resolver, self.ab_resolver)
 
 
 def rrheader_to_ip(rr):
@@ -313,9 +336,11 @@ class DualHandler:
 
     def __init__(
             self, cn_defered: defer.Deferred, ab_defered: defer.Deferred,
-            output: defer.Deferred,
+            output: defer.Deferred, **kwargs
     ):
         self.output = output
+        log_prefix = '[%d]' % kwargs.get('request_id', -1)
+        self.logger = PrefixedLogger(logger, log_prefix)
         self.sent = False
 
         self.cn_status = self.STATUS_UNK
@@ -341,14 +366,13 @@ class DualHandler:
         else:
             assert not 'possible'
 
-    @classmethod
-    def may_be_polluted(cls, result):
+    def may_be_polluted(self, result):
         answers, authority, additional = result
         if len(answers) == 1:
             rr = answers[0]  # type: dns.RRHeader
             ip = rrheader_to_ip(rr)
-            if ip is not None and not cls.is_cn_ip(ip):
-                logger.debug('maybe polluted: %s', ip)
+            if ip is not None and not self.is_cn_ip(ip):
+                self.logger.debug('maybe polluted: %s', ip)
                 return True
 
         return False
@@ -368,13 +392,13 @@ class DualHandler:
         assert not self.sent
 
         if self.cn_status == self.STATUS_SUCC:
-            logger.debug('use cn_result')
+            self.logger.debug('use cn_result')
             self.output.callback(self.cn_result)
         elif (self.cn_status, self.ab_status) == (self.STATUS_FAIL, self.STATUS_SUCC):
-            logger.debug('use ab_result')
+            self.logger.debug('use ab_result')
             self.output.callback(self.ab_result)
         elif (self.cn_status, self.ab_status) == (self.STATUS_FAIL, self.STATUS_FAIL):
-            logger.debug('both cn & ab failed')
+            self.logger.debug('both cn & ab failed')
             assert failure is not None
             self.output.errback(failure)
         else:
@@ -393,7 +417,7 @@ class DualHandler:
 
             self.status_updated()
         else:
-            logger.debug('response already sent, drop cn result')
+            self.logger.debug('response already sent, drop cn result')
 
     def ab_success(self, result):
         if not self.sent:
@@ -402,16 +426,16 @@ class DualHandler:
 
             self.status_updated()
         else:
-            logger.debug('response already sent, drop ab result')
+            self.logger.debug('response already sent, drop ab result')
 
     def cn_fail(self, failure):
-        logger.debug('cn_failed: %s', failure)
+        self.logger.debug('cn_failed: %s', failure)
         if not self.sent:
             self.cn_status = self.STATUS_FAIL
             self.status_updated(failure)
 
     def ab_fail(self, failure):
-        logger.debug('ab_failed: %s', failure)
+        self.logger.debug('ab_failed: %s', failure)
         if not self.sent:
             self.ab_status = self.STATUS_FAIL
             self.status_updated(failure)
@@ -525,7 +549,7 @@ class HostsResolver(MyBaseResolver):
             for addr in self.name2ip.get(name_str, [])
         )
 
-    def _respond(self, name, records):
+    def _respond(self, name, records, **kwargs):
         """
         Generate a response for the given name containing the given result
         records, or a failure if there are no result records.
@@ -541,7 +565,7 @@ class HostsResolver(MyBaseResolver):
             fail with L{dns.DomainError} if there are no result records.
         """
         if records:
-            logger.info('answer from hosts: %r', records)
+            logger.info('[%d]answer from hosts: %r', kwargs.get('request_id', -1), records)
             return defer.succeed((records, (), ()))
         else:
             return defer.fail(Failure(dns.DomainError(name)))
@@ -550,24 +574,27 @@ class HostsResolver(MyBaseResolver):
         """
         Return any IPv4 addresses from C{self.d2ip} as L{Record_A} instances.
         """
-        return self._respond(name, self._get_a_records(name))
+        return self._respond(name, self._get_a_records(name), **kwargs)
 
     def lookupIPV6Address(self, name, timeout=None, **kwargs):
         """
         Return any IPv6 addresses from C{self.d2ip} as L{Record_AAAA} instances.
         """
-        return self._respond(name, self._get_aaaa_records(name))
+        return self._respond(name, self._get_aaaa_records(name), **kwargs)
 
     def lookupAllRecords(self, name, timeout=None, **kwargs):
         """
         Return any addresses from C{self.d2ip} as either
         L{Record_AAAA} or L{Record_A} instances.
         """
-        return self._respond(name, self._get_all_records(name))
+        return self._respond(name, self._get_all_records(name), **kwargs)
 
     def lookupPointer(self, name, timeout=None, **kwargs):
         # TODO: ptr
         return defer.fail(NotImplementedError("HostsResolver.lookupPointer"))
+
+    def __repr__(self):
+        return '<Hosts: {}>'.format(self.filename)
 
 
 class CachingResolver(MyBaseResolver):
@@ -587,12 +614,14 @@ class CachingResolver(MyBaseResolver):
         self.cancel = dict()
 
     def _lookup(self, name, cls, type_, timeout, **kwargs):
-        # TODO: queue equivant query
+        # TODO: queue identical query
+        request_id = kwargs.get('request_id', -1)
+
         def cache_miss(query):
-            logger.debug('cache miss: %s', name.decode('latin1'))
+            logger.debug('[%d]cache miss: %s', request_id, name.decode('latin1'))
 
             def add_to_cache(res):
-                self.cache_result(query, res)
+                self.cache_result(query, res, **kwargs)
                 return res
 
             d = self.resolver.query(query, timeout=timeout, **kwargs)
@@ -622,10 +651,10 @@ class CachingResolver(MyBaseResolver):
                 # negative ttl
                 return cache_miss(q)
             else:
-                logger.debug('cache hit: %s', name.decode('latin1'))
+                logger.debug('[%d]cache hit: %s', request_id, name.decode('latin1'))
                 return defer.succeed(result)
 
-    def cache_result(self, query, payload, cache_time=None):
+    def cache_result(self, query, payload, cache_time=None, **kwargs):
         """
         Cache a DNS entry.
 
@@ -641,7 +670,7 @@ class CachingResolver(MyBaseResolver):
             default=0,
         )
 
-        logger.debug('adding to cache: %r', query)
+        logger.debug('[%d]adding to cache: %r', kwargs.get('request_id', -1), query)
         self.cache[query] = (cache_time or self.reactor.seconds(), payload)
 
         if query in self.cancel:
@@ -658,3 +687,6 @@ class CachingResolver(MyBaseResolver):
             d.cancel()
         for query in list(self.cancel.keys()):
             self.clear_entry(query)
+
+    def __repr__(self):
+        return '<Cache for={}>'.format(self.resolver.__class__.__name__)

@@ -54,6 +54,9 @@ class FakeResolver(MyBaseResolver):
         rr = make_rrheader(name, address, ttl=ttl)
         self.map[rr.name.name, rr.cls, rr.type] = ([rr], [], [])
 
+    def __repr__(self):
+        return '<Fake {:#x}>'.format(id(self))
+
 
 def make_rrheader(name: str, address: str, ttl=60):
     ip = ip_address(address)
@@ -321,7 +324,7 @@ class TestApp(TestResolverBase):
                 self.resolver = Resolver(servers=[('127.0.0.1', port)])
                 return app
 
-        self.fail('get_app() failed.')
+        self.fail('set_resolver() failed.')
 
     def test_basic(self):
         fake_resolver = FakeResolver()
