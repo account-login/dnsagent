@@ -21,8 +21,7 @@ from dnsagent.utils import watch_modification, PrefixedLogger
 # TODO: persistant tcp connection
 # TODO: socks5 proxy
 # TODO: dispaching based on input
-# TODO: log to file
-# TODO: improve log msg
+# TODO: structured log
 
 
 class MyBaseResolver(ResolverBase):

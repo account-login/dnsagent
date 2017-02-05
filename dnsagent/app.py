@@ -1,9 +1,10 @@
 import sys
 import logging
+from logging.handlers import MemoryHandler
 from argparse import ArgumentParser
 from twisted.internet import reactor, defer
 from twisted.names.dns import DNSDatagramProtocol
-from twisted.python import log
+from twisted.python.log import PythonLoggingObserver
 
 from dnsagent import logger
 from dnsagent.utils import watch_modification
@@ -111,10 +112,10 @@ def main(args=None):
     ap.add_argument(
         '-r', '--reload', action='store_true',
         help='automatically reload configuration file')
+    ap.add_argument('--log', default=None, help='path to log file')
     option = ap.parse_args(args=args)
 
-    # Output twisted messages to Python standard library logging module.
-    log.PythonLoggingObserver().start()
+    init_log(option.log)
 
     app = App(reactor)
     loader = ConfigLoader(option.config, app, reload=option.reload)
@@ -126,21 +127,34 @@ def main(args=None):
     reactor.run()
 
 
-def enable_log():
-    fmt = '%(asctime)s.%(msecs).03d %(name)s[%(process)d] %(levelname)8s %(message)s'
+LOG_FMT = '%(asctime)s.%(msecs).03d %(name)s[%(process)d] %(levelname)8s %(message)s'
+LOG_DATE_FMT = '%Y-%m-%d %H:%M:%S'
+
+
+def init_log(filename=None):
+    import logging.handlers
+    if filename is not None:
+        file_handler = logging.FileHandler(filename)
+        file_handler.setFormatter(logging.Formatter(fmt=LOG_FMT, datefmt=LOG_DATE_FMT))
+        buf_handler = MemoryHandler(64, target=file_handler)
+        logging.getLogger().addHandler(buf_handler)
+
+    # Output twisted messages to Python standard library logging module.
+    PythonLoggingObserver().start()
+
     # Initialize coloredlogs.
     try:
         import coloredlogs
     except ImportError:
-        logging.basicConfig(stream=sys.stderr, level=logging.DEBUG, format=fmt)
+        logging.basicConfig(
+            stream=sys.stderr, level=logging.DEBUG, format=LOG_FMT, datefmt=LOG_DATE_FMT)
     else:
-        coloredlogs.install(level=logging.DEBUG, fmt=fmt)
+        coloredlogs.install(level=logging.DEBUG, fmt=LOG_FMT, datefmt=LOG_DATE_FMT)
+
+
+def enable_log():
+    logging.getLogger().setLevel(logging.DEBUG)
 
 
 def disable_log():
-    try:
-        import coloredlogs
-    except ImportError:
-        logging.basicConfig(stream=sys.stderr, level=logging.CRITICAL)
-    else:
-        coloredlogs.set_level(logging.CRITICAL)
+    logging.getLogger().setLevel(logging.CRITICAL)
