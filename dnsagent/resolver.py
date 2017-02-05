@@ -572,19 +572,19 @@ class HostsResolver(MyBaseResolver):
 
     def lookupAddress(self, name, timeout=None, **kwargs):
         """
-        Return any IPv4 addresses from C{self.d2ip} as L{Record_A} instances.
+        Return any IPv4 addresses from C{self.name2ip} as L{Record_A} instances.
         """
         return self._respond(name, self._get_a_records(name), **kwargs)
 
     def lookupIPV6Address(self, name, timeout=None, **kwargs):
         """
-        Return any IPv6 addresses from C{self.d2ip} as L{Record_AAAA} instances.
+        Return any IPv6 addresses from C{self.name2ip} as L{Record_AAAA} instances.
         """
         return self._respond(name, self._get_aaaa_records(name), **kwargs)
 
     def lookupAllRecords(self, name, timeout=None, **kwargs):
         """
-        Return any addresses from C{self.d2ip} as either
+        Return any addresses from C{self.name2ip} as either
         L{Record_AAAA} or L{Record_A} instances.
         """
         return self._respond(name, self._get_all_records(name), **kwargs)

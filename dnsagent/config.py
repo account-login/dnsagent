@@ -117,8 +117,7 @@ def hosts(filename=None, *, ttl=5*60, reload=False):
 
 
 def cache(resolver):
-    resolver = make_resolver(resolver)
-    return chain([CachingResolver(resolver), resolver])
+    return CachingResolver(make_resolver(resolver))
 
 
 class ServerInfo(namedtuple('ServerInfo', 'server binds'.split())):
