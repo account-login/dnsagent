@@ -120,10 +120,6 @@ def cache(resolver):
     return CachingResolver(make_resolver(resolver))
 
 
-class ServerInfo(namedtuple('ServerInfo', 'server binds'.split())):
-    pass
-
-
 def _make_server(resolver, *, verbose=5, timeout=None):
     return MyDNSServerFactory(resolver=resolver, verbose=verbose, resolve_timeout=timeout)
 
@@ -141,9 +137,7 @@ def server(
     else:
         assert port is interface is None
 
-    return ServerInfo(
-        _make_server(
-            make_resolver(resolver), verbose=verbose, timeout=timeout,
-        ),
+    return (
+        _make_server(make_resolver(resolver), verbose=verbose, timeout=timeout),
         binds,
     )

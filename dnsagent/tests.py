@@ -10,7 +10,7 @@ from twisted.trial import unittest
 import pytest
 
 from dnsagent.config import (
-    parse_dns_server_string, DnsServerInfo, InvalidDnsServerString, ServerInfo
+    parse_dns_server_string, DnsServerInfo, InvalidDnsServerString,
 )
 from dnsagent.resolver import (
     parse_hosts_file, rrheader_to_ip,
@@ -317,7 +317,7 @@ class TestApp(TestResolverBase):
         for i in range(10):
             port = random.randrange(1024, 60000)
             try:
-                app.start(ServerInfo(server, [('', port)]))
+                app.start((server, [('', port)]))
             except CannotListenError:
                 pass
             else:

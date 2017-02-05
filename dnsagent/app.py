@@ -36,9 +36,8 @@ class App:
         self._is_running = True
 
     def _start(self, server_info):
-        binds = server_info.binds
+        factory, binds = server_info
         self.ports.clear()
-        factory = server_info.server
         for interface, port in binds:
             protocol = DNSDatagramProtocol(controller=factory)
             self.ports.append(self._start_udp(port, protocol, interface))
