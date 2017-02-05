@@ -127,13 +127,14 @@ def main(args=None):
 
 
 def enable_log():
+    fmt = '%(asctime)s.%(msecs).03d %(name)s[%(process)d] %(levelname)8s %(message)s'
     # Initialize coloredlogs.
     try:
         import coloredlogs
     except ImportError:
-        logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+        logging.basicConfig(stream=sys.stderr, level=logging.DEBUG, format=fmt)
     else:
-        coloredlogs.install(level=logging.DEBUG)
+        coloredlogs.install(level=logging.DEBUG, fmt=fmt)
 
 
 def disable_log():
