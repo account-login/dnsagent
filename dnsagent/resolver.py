@@ -18,6 +18,7 @@ from dnsagent.utils import watch_modification, PrefixedLogger
 # TODO: round robin
 # TODO: edns_client_subnet
 # TODO: dns over https: https://developers.google.com/speed/public-dns/docs/dns-over-https
+# TODO: statistics
 # TODO: persistant tcp connection
 # TODO: socks5 proxy
 # TODO: dispaching based on input
