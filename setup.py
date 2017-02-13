@@ -16,7 +16,11 @@ setup(
         'iprir>=0.1.2.dev0',
         'twisted>=16',
         'watchdog>=0.8',
+        'zope.interface',
     ],
+    extra_require={
+        ':python_version<="3.4"': ['typing'],
+    },
     url='https://github.com/account-login/dnsagent',
     license='MIT',
     author='account-login',

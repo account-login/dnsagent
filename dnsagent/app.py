@@ -127,7 +127,7 @@ def main(args=None):
     reactor.run()
 
 
-LOG_FMT = '%(asctime)s.%(msecs).03d %(name)s[%(process)d] %(levelname)8s %(message)s'
+LOG_FMT = '%(asctime)s.%(msecs)03d %(name)s[%(process)d] %(levelname)8s %(message)s'
 LOG_DATE_FMT = '%Y-%m-%d %H:%M:%S'
 
 
