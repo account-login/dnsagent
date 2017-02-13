@@ -10,10 +10,7 @@ dist: trusty
 
 # command to install dependencies
 install:
-  - pip install pytest-sugar
-  - pip install pytest-cov
-  - pip install codecov
-  - pip install coloredlogs
+  - pip install -r requirements_travis.txt
   - python setup.py install --record record.txt
 
 # command to run tests
