@@ -16,7 +16,7 @@ from dnsagent.app import init_log, enable_log
 from dnsagent.socks import (
     read_socks_host, encode_socks_host, BadSocksHost, InsufficientData,
     UDPRelayPacket, BadUDPRelayPacket, UDPRelayProtocol, UDPRelayTransport,
-    Socks5ControlProtocol, UDPRelay,
+    Socks5ControlProtocol, UDPRelay, Socks5Relay,
 )
 
 
@@ -461,6 +461,16 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
     def tearDown(self):
         dl = [ super().tearDown(), defer.maybeDeferred(self.reverser_transport.stopListening) ]
         return defer.DeferredList(dl)
+
+
+# noinspection PyAttributeOutsideInit
+class TestSocks5RelayWithSS(TestUDPRelayWithSS):
+    def setup_socks5_client(self):
+        self.relay = Socks5Relay(
+            (self.proxy_host, self.proxy_port), reactor=self.reactor,
+        )
+        self.ctrl_proto = self.relay.ctrl_proto
+        self.relay_done = self.relay.udp_relay_defer
 
 
 class Reverser(DatagramProtocol):

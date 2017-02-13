@@ -2,8 +2,11 @@ from ipaddress import IPv4Address, IPv6Address, ip_address
 import struct
 import socket
 from io import BytesIO
-from typing import Union, Optional, NamedTuple, Tuple
+from typing import NamedTuple, Union, Optional, Tuple
 
+from twisted.internet.endpoints import (
+    TCP4ClientEndpoint, TCP6ClientEndpoint, HostnameEndpoint, connectProtocol,
+)
 from twisted.internet.protocol import DatagramProtocol, Protocol, connectionDone
 from twisted.internet.interfaces import IListeningPort, IUDPTransport, IReactorUDP
 from twisted.internet.error import MessageLengthError, CannotListenError
@@ -478,3 +481,62 @@ class Socks5ControlProtocol(Protocol):
             self.check_udp_associate_reply()
         else:
             logger.error('unexpected server data: %r', data)
+
+
+def get_client_endpoint(reactor, addr: Tuple[str, int]):
+    host, port = addr
+    try:
+        ipobj = ip_address(host)
+    except ValueError:
+        return HostnameEndpoint(reactor, host.encode(), port)
+    else:
+        if isinstance(ipobj, IPv4Address):
+            return TCP4ClientEndpoint(reactor, host, port)
+        else:
+            return TCP6ClientEndpoint(reactor, host, port)
+
+
+@implementer(IReactorUDP)
+class Socks5Relay:
+    def __init__(self, proxy_addr, reactor=None):
+        self.proxy_addr = proxy_addr
+        if reactor is None:
+            from twisted.internet import reactor
+        self.reactor = reactor
+
+        self._setup_udp_relay()
+
+    # noinspection PyAttributeOutsideInit
+    def _setup_udp_relay(self):
+        def proxy_connected(ignore):
+            d = self.ctrl_proto.get_udp_relay()
+            d.addCallbacks(got_relay, self.udp_relay_defer.errback)
+
+        def got_relay(relay):
+            self.udp_relay = relay
+            self.udp_relay_defer.callback(relay)
+
+        self.proxy_endpoint = get_client_endpoint(self.reactor, self.proxy_addr)
+        self.udp_relay = None   # type: Optional[UDPRelay]
+        self.udp_relay_defer = defer.Deferred()
+        self.ctrl_proto = Socks5ControlProtocol()
+        ctrl_connected = connectProtocol(self.proxy_endpoint, self.ctrl_proto)
+        ctrl_connected.addCallbacks(proxy_connected, self.udp_relay_defer.errback)
+
+    def listenUDP(self, port, protocol, interface='', maxPacketSize=8192):
+        if self.udp_relay is None:
+            if not self.udp_relay_defer.called:
+                raise CannotListenError(interface, port, socket.error('relay not set up'))
+            else:
+                raise CannotListenError(interface, port, socket.error('fail to set up relay'))
+        else:
+            return self.udp_relay.listenUDP(
+                port, protocol, interface=interface, maxPacketSize=maxPacketSize,
+            )
+
+    def stop(self):
+        self.ctrl_proto.transport.loseConnection()
+        if self.udp_relay is not None:
+            return self.udp_relay.stop()
+        else:
+            return defer.succeed(None)
