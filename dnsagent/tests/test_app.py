@@ -6,7 +6,8 @@ from twisted.internet.error import CannotListenError
 
 from dnsagent.app import App
 from dnsagent.config import parse_dns_server_string, DnsServerInfo, InvalidDnsServerString
-from dnsagent.resolver import parse_hosts_file, Resolver
+from dnsagent.resolver import Resolver
+from dnsagent.resolver.hosts import parse_hosts_file
 from dnsagent.server import MyDNSServerFactory
 from dnsagent.tests import iplist, FakeResolver, TestResolverBase
 

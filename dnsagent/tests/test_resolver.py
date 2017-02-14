@@ -5,9 +5,8 @@ from ipaddress import IPv4Address
 from twisted.internet import task
 from twisted.names import dns
 
-from dnsagent.resolver import (
-    rrheader_to_ip, HostsResolver, CachingResolver, ParallelResolver,
-)
+from dnsagent.resolver import HostsResolver, CachingResolver, ParallelResolver
+from dnsagent.utils import rrheader_to_ip
 from dnsagent.tests import iplist, FakeResolver, TestResolverBase
 
 

@@ -516,11 +516,11 @@ class Socks5Relay:
             self.udp_relay = relay
             self.udp_relay_defer.callback(relay)
 
-        self.proxy_endpoint = get_client_endpoint(self.reactor, self.proxy_addr)
+        proxy_endpoint = get_client_endpoint(self.reactor, self.proxy_addr)
         self.udp_relay = None   # type: Optional[UDPRelay]
         self.udp_relay_defer = defer.Deferred()
         self.ctrl_proto = Socks5ControlProtocol()
-        ctrl_connected = connectProtocol(self.proxy_endpoint, self.ctrl_proto)
+        ctrl_connected = connectProtocol(proxy_endpoint, self.ctrl_proto)
         ctrl_connected.addCallbacks(proxy_connected, self.udp_relay_defer.errback)
 
     def listenUDP(self, port, protocol, interface='', maxPacketSize=8192):

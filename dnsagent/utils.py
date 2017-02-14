@@ -1,5 +1,8 @@
 import os
+import socket
+from ipaddress import IPv4Address, IPv6Address
 
+from twisted.names import dns
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
 from watchdog.observers import Observer
 
@@ -45,3 +48,13 @@ class PrefixedLogger:
 
     def critical(self, msg, *args, **kwargs):
         self.logger.critical(self.prefix + msg, *args, **kwargs)
+
+
+def rrheader_to_ip(rr):
+    payload = rr.payload
+    if isinstance(payload, dns.Record_A):
+        return IPv4Address(payload.dottedQuad())
+    elif isinstance(payload, dns.Record_AAAA):
+        return IPv6Address(socket.inet_ntop(socket.AF_INET6, payload.address))
+    else:
+        return None
