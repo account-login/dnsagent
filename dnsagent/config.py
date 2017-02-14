@@ -107,13 +107,17 @@ def dual(cn, ab):
     return DualResovlver(cn, ab)
 
 
-def hosts(filename=None, *, ttl=5*60, reload=False):
-    if filename is None:
+def hosts(filename_or_mapping=None, *, ttl=5*60, reload=False):
+    if filename_or_mapping is None:
         if os.name == 'nt':
             filename = os.path.join(os.environ['SYSTEMROOT'], 'system32/drivers/etc/hosts')
         else:
             filename = '/etc/hosts'
-    return HostsResolver(filename, ttl=ttl, reload=reload)
+        return HostsResolver(filename=filename, ttl=ttl, reload=reload)
+    elif isinstance(filename_or_mapping, str):
+        return HostsResolver(filename=filename_or_mapping, ttl=ttl, reload=reload)
+    else:
+        return HostsResolver(mapping=filename_or_mapping, ttl=ttl, reload=reload)
 
 
 def cache(resolver):

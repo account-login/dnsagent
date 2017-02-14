@@ -1,5 +1,6 @@
 from collections import defaultdict
 from ipaddress import ip_address, IPv4Address, IPv6Address
+from typing import Mapping
 
 from twisted.internet import defer
 from twisted.names import dns
@@ -62,18 +63,22 @@ class HostsResolver(MyResolverBase):
 
     ref: twisted.names.hosts.Resolver
     """
-    def __init__(self, filename, *, ttl=60*60, reload=False):
+    def __init__(self, *, filename=None, mapping: Mapping[str, str]=None, ttl=60*60, reload=False):
         super().__init__()
         self.filename = filename
         self.ttl = ttl
-        self._load_hosts()
 
-        if reload:
-            watch_modification(filename, self._load_hosts)
-
-    def _load_hosts(self):
-        logger.debug('loading hosts file: %s', self.filename)
-        self.name2ip = read_hosts_file(self.filename)
+        if filename is not None:
+            assert mapping is None
+            logger.debug('loading hosts file: %s', self.filename)
+            self.name2ip = read_hosts_file(self.filename)
+            if reload:
+                watch_modification(filename, self._load_hosts)
+        elif mapping is not None:
+            self.name2ip = {
+                domain.lower(): [ ip_address(ip) ]
+                for domain, ip in mapping.items()
+            }
 
     def _get_a_records(self, name: bytes):
         """

@@ -5,6 +5,7 @@ from ipaddress import IPv4Address
 from twisted.internet import task
 from twisted.names import dns
 
+from dnsagent.config import hosts
 from dnsagent.resolver import HostsResolver, CachingResolver, ParallelResolver
 from dnsagent.utils import rrheader_to_ip
 from dnsagent.tests import iplist, FakeResolver, TestResolverBase
@@ -14,7 +15,6 @@ class TestHostsResolver(TestResolverBase):
     def setUp(self):
         super().setUp()
 
-        self.hosts_file = None
         hosts_string = '''
             127.0.0.1   localhost loopback
             ::1         localhost   # asdf
@@ -22,17 +22,11 @@ class TestHostsResolver(TestResolverBase):
         self.setup_resolver(hosts_string)
 
     def setup_resolver(self, hosts_string):
-        fd, self.hosts_file = tempfile.mkstemp(prefix='hosts_', suffix='.txt', text=True)
+        fd, hosts_file = tempfile.mkstemp(prefix='hosts_', suffix='.txt', text=True)
         os.write(fd, hosts_string.encode('utf8'))
-        self.resolver = HostsResolver(self.hosts_file)
+        self.resolver = HostsResolver(filename=hosts_file)
         os.close(fd)
-
-    def tearDown(self):
-        d = super().tearDown()
-        return d.addBoth(lambda ignore: self.cleanup())
-
-    def cleanup(self):
-        os.unlink(self.hosts_file)
+        self.addCleanup(os.unlink, hosts_file)
 
     def test_resolve(self):
         self.check_a('localhost', iplist('127.0.0.1'))
@@ -41,6 +35,26 @@ class TestHostsResolver(TestResolverBase):
         self.check_a('loopback', iplist('127.0.0.1'))
 
         self.check_a('asdf.asdf', fail=True)
+
+
+class TestHostResolverMapping(TestResolverBase):
+    def setUp(self):
+        super().setUp()
+        self.resolver = HostsResolver(mapping=dict(ASDF='1.2.3.4', localhost='::1'))
+
+    def test_resolve(self):
+        self.check_a('asdf', iplist('1.2.3.4'))
+        self.check_aaaa('LocalHost', iplist('::1'))
+        self.check_a('qwer', fail=True)
+
+
+def test_config_hosts():
+    # use system hosts file
+    resolver = hosts()
+    assert os.path.exists(resolver.filename)
+
+    resolver = hosts(dict(ABC='1.2.3.4'))
+    assert resolver.name2ip == dict(abc=iplist('1.2.3.4'))
 
 
 class TestCachingResolver(TestResolverBase):
