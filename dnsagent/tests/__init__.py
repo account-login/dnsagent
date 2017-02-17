@@ -71,41 +71,28 @@ class TestResolverBase(unittest.TestCase):
         self.resolver = None
 
     def tearDown(self):
-        return defer.gatherResults(self.defereds)
+        return defer.DeferredList(self.defereds, fireOnOneErrback=True)
 
     def _check_query(self, query: dns.Query, expect=None, fail=False):
         if fail:
             assert expect is None
 
-        d = defer.Deferred()
-        self.defereds.append(d)
-
         def check_result(result):
-            try:
-                if fail:
-                    self.fail('dns failure expected')
+            if fail:
+                self.fail('dns failure expected')
 
-                ans, auth, add = result
-                assert [rrheader_to_ip(rr) for rr in ans] == expect
-            except:
-                d.callback(False)
-                raise
-            else:
-                d.callback(True)
+            ans, auth, add = result
+            assert [rrheader_to_ip(rr) for rr in ans] == expect
 
         def failed(failure):
-            try:
-                if not fail:
-                    print('query failed: ', query)
-                    print(failure)
-                    self.fail('query failed')
-            except:
-                d.callback(False)
-                raise
-            else:
-                d.callback(True)
+            if not fail:
+                print('query failed: ', query)
+                print(failure)
+                self.fail('query failed')
 
-        self.resolver.query(query, timeout=[0.5]).addCallbacks(check_result, failed)
+        d = self.resolver.query(query, timeout=[0.5])
+        d.addCallbacks(check_result, failed)
+        self.defereds.append(d)
         return d
 
     def check_a(self, name: str, expect=None, fail=False):
