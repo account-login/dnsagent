@@ -18,9 +18,10 @@ setup(
         'watchdog>=0.8',
         'zope.interface',
     ],
-    extra_require={
+    extras_require={
         ':python_version<"3.5"': ['typing'],
     },
+    python_requires='>=3.4',
     url='https://github.com/account-login/dnsagent',
     license='MIT',
     author='account-login',
