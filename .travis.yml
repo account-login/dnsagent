@@ -10,6 +10,7 @@ dist: trusty
 
 # command to install dependencies
 install:
+  - pip install wheel
   - pip install -r requirements_travis.txt
   - python setup.py install --record record.txt
 
