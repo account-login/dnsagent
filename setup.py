@@ -19,7 +19,7 @@ setup(
         'zope.interface',
     ],
     extra_require={
-        ':python_version<="3.4"': ['typing'],
+        ':python_version<"3.5"': ['typing'],
     },
     url='https://github.com/account-login/dnsagent',
     license='MIT',
