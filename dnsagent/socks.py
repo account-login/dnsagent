@@ -2,6 +2,8 @@ from ipaddress import IPv4Address, IPv6Address, ip_address
 import struct
 import socket
 from io import BytesIO
+import logging
+
 from typing import NamedTuple, Union, Optional, Tuple
 
 from twisted.internet.endpoints import (
@@ -11,11 +13,12 @@ from twisted.internet.protocol import DatagramProtocol, Protocol, connectionDone
 from twisted.internet.interfaces import IListeningPort, IUDPTransport, IReactorUDP
 from twisted.internet.error import MessageLengthError, CannotListenError
 from twisted.python.failure import Failure
-from twisted.internet import address
+from twisted.internet import address as taddress
 from twisted.internet import defer
 from zope.interface import implementer
 
-from dnsagent import logger
+
+logger = logging.getLogger(__name__)
 
 
 SocksHost = Union[IPv4Address, IPv6Address, str]
@@ -113,21 +116,23 @@ class UDPRelayPacket(_UDPRelayPacketBase):
 
 
 class UDPRelayProtocol(DatagramProtocol):
+    user_protocol = None
+    connected_addr = None
+
     def startProtocol(self):
         """Called when a transport is connected to this protocol.
 
         Will only be called once, even if multiple ports are connected.
         """
-        self.protocols = dict()
 
     def stopProtocol(self):
         """Called when the transport is disconnected.
 
         Will only be called once, after all ports are disconnected.
         """
-        for proto in self.protocols.values():
-            proto.stopProtocol()
-        self.protocols.clear()
+        if self.user_protocol is not None:
+            self.user_protocol.doStop()
+            self.user_protocol = None
 
     def datagramReceived(self, datagram: bytes, addr):
         """Called when a datagram is received.
@@ -138,15 +143,18 @@ class UDPRelayProtocol(DatagramProtocol):
         try:
             packet = UDPRelayPacket.loads(datagram)
         except BadUDPRelayPacket:
-            logger.exception('bad udp relay packet')
+            logger.exception('bad udp relay packet: %r', datagram)
             return
 
         remote_host = str(packet.host)
-        proto = self.protocols.get((remote_host, packet.port))
-        if proto is not None:
-            proto.datagramReceived(packet.data, (remote_host, packet.port))
+        connection = (remote_host, packet.port)
+        if self.user_protocol is not None:
+            if self.connected_addr is None or self.connected_addr == connection:
+                self.user_protocol.datagramReceived(packet.data, connection)
+            else:
+                logger.error('unexpected packet: %r', packet)
         else:
-            logger.error('unexpected packet: %r', packet)
+            logger.error('user_protocol not set')
 
     def send_datagram(self, data: bytes, host: SocksHost, port: int, max_size=None):
         packed = UDPRelayPacket(host, port, data).dumps()
@@ -154,24 +162,26 @@ class UDPRelayProtocol(DatagramProtocol):
             raise MessageLengthError("message too long: %d > %d" % (len(packed), max_size))
         self.transport.write(packed)
 
-    def connect_protocol(self, addr, proto):
-        self.protocols[addr] = proto
+    def connect(self, addr):
+        assert self.connected_addr is None
+        self.connected_addr = addr
 
-    def disconnect_protocol(self, addr):
-        del self.protocols[addr]
+    def set_user_protocol(self, proto: DatagramProtocol):
+        assert self.user_protocol is None
+        self.user_protocol = proto
 
 
 @implementer(IListeningPort, IUDPTransport)
 class UDPRelayTransport:
     def __init__(
-            self, port: int, proto, *, relay_protocol: UDPRelayProtocol,
-            max_packet_size: int = 8192, on_stop=None
+            self, port: int, proto, *,
+            relay_protocol: UDPRelayProtocol, max_packet_size: int = 8192
     ):
         self.port = port
         self.protocol = proto
         self.relay_proto = relay_protocol
+        self.relay_proto.set_user_protocol(proto)
         self.max_size = max_packet_size
-        self.on_stop = on_stop
         self.connected_addr = None
 
     def startListening(self):
@@ -191,11 +201,7 @@ class UDPRelayTransport:
         If it does not complete immediately, will return Deferred that fires
         upon completion.
         """
-        if self.connected_addr is not None:
-            self.relay_proto.disconnect_protocol(self.connected_addr)
-            self.connected_addr = None
-        if self.on_stop is not None:
-            self.on_stop()
+        self.connected_addr = None
 
     def getHost(self):
         """
@@ -207,19 +213,24 @@ class UDPRelayTransport:
         try:
             ipobj = ip_address(host)
         except ValueError:
-            return address.HostnameAddress(host, port)
+            return taddress.HostnameAddress(host, port)
         else:
             if isinstance(ipobj, IPv4Address):
-                return address.IPv4Address('UDP', host, port)
+                return taddress.IPv4Address('UDP', host, port)
             else:
                 assert isinstance(ipobj, IPv6Address)
-                return address.IPv6Address('UDP', host, port)
+                return taddress.IPv6Address('UDP', host, port)
 
     def connect(self, host, port):
         if self.connected_addr is not None:
             raise RuntimeError("already connected, reconnecting is not currently supported")
+
+        try:
+            host = str(ip_address(host))    # normalize ip address
+        except ValueError:
+            pass    # may be domain name
         self.connected_addr = (host, port)
-        self.relay_proto.connect_protocol(self.connected_addr, self.protocol)
+        self.relay_proto.connect(self.connected_addr)
 
     def write(self, datagram, addr=None):
         """
@@ -252,7 +263,7 @@ class UDPRelay:
     def __init__(self, ctrl_protocol: 'Socks5ControlProtocol', reactor=None):
         self.ctrl_proto = ctrl_protocol
         self.relay_proto = UDPRelayProtocol()
-        self.listening_ports = set()
+        self.listening_port = None
 
         def set_flag(result):
             self.relay_done = True
@@ -280,7 +291,7 @@ class UDPRelay:
 
             relay_port_bind = self.relay_port.getHost()
             client_host, client_port = relay_port_bind.host, relay_port_bind.port
-            # FIXME: hacks
+            # XXX: hacks
             client_host = {
                 '0.0.0.0': '127.0.0.1',
                 '::': '::1',
@@ -316,20 +327,22 @@ class UDPRelay:
         """
         if not self.relay_done:
             raise CannotListenError(interface, port, socket.error('relay not set up'))
-        transport = UDPRelayTransport(
+        if self.listening_port is not None:
+            raise RuntimeError('can not listen more than once')
+
+        self.listening_port = UDPRelayTransport(
             port, protocol, relay_protocol=self.relay_proto, max_packet_size=maxPacketSize,
-            on_stop=lambda: self.listening_ports.remove(transport),
         )
-        self.listening_ports.add(transport)
-        transport.startListening()
-        return transport
+        self.listening_port.startListening()
+        return self.listening_port
 
     def stop(self):
         if self._stop_defer is None:
-            dl = [ defer.maybeDeferred(port.stopListening)
-                   for port in self.listening_ports.copy() ]
-            if self.relay_port is not None:
-                dl.append(defer.maybeDeferred(self.relay_port.stopListening))
+            dl = [defer.maybeDeferred(self.ctrl_proto.transport.loseConnection)]
+            if self.listening_port is not None:
+                dl.append(defer.maybeDeferred(self.listening_port.stopListening))
+            if self.relay_proto.transport is not None:
+                dl.append(defer.maybeDeferred(self.relay_proto.transport.stopListening))
             self._stop_defer = defer.DeferredList(dl)
         return self._stop_defer
 
@@ -378,7 +391,6 @@ class Socks5ControlProtocol(Protocol):
 
     def check_greet_reply(self):
         def fail():
-            self.transport.loseConnection()
             self.data = b''
             self.status = 'failed'
             self.auth_defer.errback(Failure(Exception('greeting failed')))
@@ -420,7 +432,6 @@ class Socks5ControlProtocol(Protocol):
     def check_udp_associate_reply(self):
         def fail(exc_value=None):
             exc_value = exc_value or Exception('udp associate: bad reply')
-            self.transport.loseConnection()
             self.data = b''
             self.status = 'failed'
             self.request_defer.errback(Failure(exc_value))
@@ -475,6 +486,7 @@ class Socks5ControlProtocol(Protocol):
 
     def dataReceived(self, data):
         self.data += data
+        # TODO: loop
         if self.status == 'greeted':
             self.check_greet_reply()
         elif self.status == 'udp_req':
@@ -496,47 +508,18 @@ def get_client_endpoint(reactor, addr: Tuple[str, int]):
             return TCP6ClientEndpoint(reactor, host, port)
 
 
-@implementer(IReactorUDP)
-class Socks5Relay:
-    def __init__(self, proxy_addr, reactor=None):
-        self.proxy_addr = proxy_addr
-        if reactor is None:
-            from twisted.internet import reactor
-        self.reactor = reactor
+def get_udp_relay(proxy_addr, reactor=None):
+    def proxy_connected(ignore):
+        d = ctrl_proto.get_udp_relay()
+        d.chainDeferred(rv)
 
-        self._setup_udp_relay()
+    if reactor is None:
+        from twisted.internet import reactor
 
-    # noinspection PyAttributeOutsideInit
-    def _setup_udp_relay(self):
-        def proxy_connected(ignore):
-            d = self.ctrl_proto.get_udp_relay()
-            d.addCallbacks(got_relay, self.udp_relay_defer.errback)
+    rv = defer.Deferred()
+    proxy_endpoint = get_client_endpoint(reactor, proxy_addr)
+    ctrl_proto = Socks5ControlProtocol()
+    ctrl_connected = connectProtocol(proxy_endpoint, ctrl_proto)
+    ctrl_connected.addCallbacks(proxy_connected, rv.errback)
 
-        def got_relay(relay):
-            self.udp_relay = relay
-            self.udp_relay_defer.callback(relay)
-
-        proxy_endpoint = get_client_endpoint(self.reactor, self.proxy_addr)
-        self.udp_relay = None   # type: Optional[UDPRelay]
-        self.udp_relay_defer = defer.Deferred()
-        self.ctrl_proto = Socks5ControlProtocol()
-        ctrl_connected = connectProtocol(proxy_endpoint, self.ctrl_proto)
-        ctrl_connected.addCallbacks(proxy_connected, self.udp_relay_defer.errback)
-
-    def listenUDP(self, port, protocol, interface='', maxPacketSize=8192):
-        if self.udp_relay is None:
-            if not self.udp_relay_defer.called:
-                raise CannotListenError(interface, port, socket.error('relay not set up'))
-            else:
-                raise CannotListenError(interface, port, socket.error('fail to set up relay'))
-        else:
-            return self.udp_relay.listenUDP(
-                port, protocol, interface=interface, maxPacketSize=maxPacketSize,
-            )
-
-    def stop(self):
-        self.ctrl_proto.transport.loseConnection()
-        if self.udp_relay is not None:
-            return self.udp_relay.stop()
-        else:
-            return defer.succeed(None)
+    return rv

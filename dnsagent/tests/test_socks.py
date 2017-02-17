@@ -16,7 +16,7 @@ from dnsagent.app import init_log, enable_log
 from dnsagent.socks import (
     read_socks_host, encode_socks_host, BadSocksHost, InsufficientData,
     UDPRelayPacket, BadUDPRelayPacket, UDPRelayProtocol, UDPRelayTransport,
-    Socks5ControlProtocol, UDPRelay, Socks5Relay,
+    Socks5ControlProtocol, UDPRelay, get_udp_relay,
 )
 
 
@@ -80,6 +80,13 @@ class FakeTransport:
         assert self.connected
         self.connected = False
 
+    stopListening = loseConnection
+
+    def poplogs(self):
+        logs = self.write_logs
+        self.write_logs = []
+        return logs
+
 
 class FakeDatagramProtocol(DatagramProtocol):
     def __init__(self):
@@ -94,20 +101,25 @@ def test_udp_relay_protocol():
     tr = FakeTransport()
     relay_proto.makeConnection(tr)
     dp = FakeDatagramProtocol()
-    relay_proto.connect_protocol(('127.0.0.1', 1234), dp)
 
+    # accept all packet if not connected
+    relay_proto.set_user_protocol(dp)
     packet = UDPRelayPacket(ip_address('127.0.0.1'), 1234, b'1234')
     relay_proto.datagramReceived(packet.dumps(), ('1.2.3.4', 4567))
     assert dp.data_logs == [(b'1234', ('127.0.0.1', 1234))]
     dp.data_logs.clear()
 
-    relay_proto.disconnect_protocol(('127.0.0.1', 1234))
-    relay_proto.datagramReceived(packet.dumps(), ('1.2.3.4', 4567))     # drops
+    # drop unexpected packet if connected
+    relay_proto.connect(('127.0.0.88', 8899))
+    packet = UDPRelayPacket(ip_address('127.0.0.1'), 1234, b'1234')
+    relay_proto.datagramReceived(packet.dumps(), ('1.2.3.4', 4567))
     assert dp.data_logs == []
 
-    relay_proto.send_datagram(b'asdf', ip_address('2.3.4.5'), 2345)
-    packet = UDPRelayPacket(ip_address('2.3.4.5'), 2345, b'asdf')
-    assert tr.write_logs == [(packet.dumps(), None)]
+    # accept relevant packet
+    packet = UDPRelayPacket(ip_address('127.0.0.88'), 8899, b'8899')
+    relay_proto.datagramReceived(packet.dumps(), ('1.2.3.4', 4567))
+    assert dp.data_logs == [(b'8899', ('127.0.0.88', 8899))]
+    dp.data_logs.clear()
 
 
 def test_udp_relay_port():
@@ -115,19 +127,20 @@ def test_udp_relay_port():
     tr = FakeTransport()
     relay_proto = UDPRelayProtocol()
     relay_proto.makeConnection(tr)
+
     relay_transport = UDPRelayTransport(1212, user_proto, relay_protocol=relay_proto)
+    assert relay_proto.user_protocol is user_proto
 
     relay_transport.startListening()
     assert user_proto.transport is relay_transport
 
     relay_transport.connect('1.2.3.4', 1234)
-    assert relay_proto.protocols[('1.2.3.4', 1234)] is user_proto
+    assert relay_transport.connected_addr == relay_proto.connected_addr == ('1.2.3.4', 1234)
 
     # write a connected transport
     user_proto.transport.write(b'asdf')
     packet = UDPRelayPacket(ip_address('1.2.3.4'), 1234, b'asdf')
-    assert tr.write_logs == [(packet.dumps(), None)]
-    tr.write_logs.clear()
+    assert tr.poplogs() == [(packet.dumps(), None)]
 
     # getHost()
     from twisted.internet import address
@@ -136,12 +149,11 @@ def test_udp_relay_port():
     # stopListening()
     relay_transport.stopListening()
     assert relay_transport.connected_addr is None
-    assert ('1.2.3.4', 1234) not in relay_proto.protocols
 
     # write a un-connected transport
     relay_transport.write(b'zxcv', ('2.3.4.5', 2345))
     packet = UDPRelayPacket(ip_address('2.3.4.5'), 2345, b'zxcv')
-    assert tr.write_logs == [(packet.dumps(), None)]
+    assert tr.poplogs() == [(packet.dumps(), None)]
 
 
 # noinspection PyAttributeOutsideInit
@@ -186,7 +198,6 @@ class TestSocks5ControlProtocol(unittest.TestCase):
         assert self.ctrl_proto.status == 'failed'
         assert isinstance(self.auth_result, Failure)
         assert self.ctrl_proto.data == b''
-        assert not self.transport.connected
 
     def test_udp_associate_request(self):
         self.ctrl_proto.dataReceived(b'\x05\x00')
@@ -214,7 +225,6 @@ class TestSocks5ControlProtocol(unittest.TestCase):
 
     def test_udp_associate_protocol_fail(self):
         d = self._run_udp_associate_failure_test(b'\5\0\0\x08\2\3\4\5\x23\x45', 'failed')
-        assert not self.transport.connected
         return d
 
     def _run_udp_associate_failure_test(self, data, status):
@@ -273,12 +283,8 @@ class TestUDPRelay(unittest.TestCase):
         user_proto = Greeter(greet_to)
         port = self.relay.listenUDP(0x1234, user_proto)
         assert user_proto.transport is port
-        assert user_proto is self.relay.relay_proto.protocols[greet_to]
-        assert port in self.relay.listening_ports
-
-        port.stopListening()
-        assert greet_to not in self.relay.relay_proto.protocols
-        assert port not in self.relay.listening_ports
+        assert self.relay.relay_proto.user_protocol is user_proto
+        assert self.relay.listening_port is port
 
         return self.relay.stop()
 
@@ -287,6 +293,15 @@ class TestUDPRelay(unittest.TestCase):
             self.ctrl_proto.dataReceived(data)
             with pytest.raises(CannotListenError):
                 self.relay.listenUDP(0x1234, Greeter(('4.3.2.1', 0x4321)))
+
+        return self.relay.stop()
+
+    def test_listenUDP_can_not_listen_more_than_once(self):
+        self.ctrl_proto.dataReceived(b'\5\0')
+        self.ctrl_proto.dataReceived(b'\5\0\0\x01\x7f\0\0\x08\x23\x45')
+        self.relay.listenUDP(0x1234, FakeDatagramProtocol())
+        with pytest.raises(RuntimeError):
+            self.relay.listenUDP(0x2345, FakeDatagramProtocol())
 
         return self.relay.stop()
 
@@ -354,7 +369,7 @@ class BaseTestUDPRelayIntegrated(unittest.TestCase):
         self.reactor = reactor
 
         self.setup_socks5_server()
-        self.setup_user_protocol()
+        self.setup_target_service()
         self.setup_socks5_client()
 
         return self.relay_done
@@ -362,7 +377,7 @@ class BaseTestUDPRelayIntegrated(unittest.TestCase):
     def setup_socks5_server(self):
         raise NotImplementedError
 
-    def setup_user_protocol(self):
+    def setup_target_service(self):
         raise NotImplementedError
 
     def setup_socks5_client(self):
@@ -384,14 +399,13 @@ class BaseTestUDPRelayIntegrated(unittest.TestCase):
         ctrl_connected.addBoth(proxy_connected)
 
     def tearDown(self):
-        self.ctrl_proto.transport.loseConnection()
         return self.relay.stop()
 
     def test_run(self):
         def check_result(respond):
             assert respond == b'olleh'
 
-        user_proto = Greeter((self.reverser_host, self.reverser_port))
+        user_proto = Greeter((self.service_host, self.service_port))
         self.relay.listenUDP(0x4321, user_proto)
         return user_proto.d.addCallback(check_result)
 
@@ -408,8 +422,8 @@ class TestUDPRelayWithFakeServer(BaseTestUDPRelayIntegrated):
             self.proxy_port, self.server_ctrl_factory, interface=self.proxy_host,
         )
 
-    def setup_user_protocol(self):
-        self.reverser_host, self.reverser_port = '127.0.0.66', 6666
+    def setup_target_service(self):
+        self.service_host, self.service_port = '127.0.0.66', 6666
 
     def tearDown(self):
         relay_server_port = self.server_ctrl_factory.protocol_inst.relay_server_port
@@ -427,8 +441,8 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
     ss_client_host = '127.0.0.30'
     ss_client_port = 3333
     ss_passwd = '123'
-    reverser_host = '127.0.0.40'
-    reverser_port = 4444
+    service_host = '127.0.0.40'
+    service_port = 4444
 
     @classmethod
     def setUpClass(cls):
@@ -452,10 +466,9 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
     def setup_socks5_server(self):
         pass
 
-    def setup_user_protocol(self):
-        self.reverser_proto = Reverser()
+    def setup_target_service(self):
         self.reverser_transport = self.reactor.listenUDP(
-            self.reverser_port, self.reverser_proto, interface=self.reverser_host,
+            self.service_port, Reverser(), interface=self.service_host,
         )
 
     def tearDown(self):
@@ -464,13 +477,12 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
 
 
 # noinspection PyAttributeOutsideInit
-class TestSocks5RelayWithSS(TestUDPRelayWithSS):
+class TestGetUDPRelayWithSS(TestUDPRelayWithSS):
     def setup_socks5_client(self):
-        self.relay = Socks5Relay(
+        self.relay_done = get_udp_relay(
             (self.proxy_host, self.proxy_port), reactor=self.reactor,
         )
-        self.ctrl_proto = self.relay.ctrl_proto
-        self.relay_done = self.relay.udp_relay_defer
+        self.relay_done.addCallback(lambda relay: setattr(self, 'relay', relay))
 
 
 class Reverser(DatagramProtocol):

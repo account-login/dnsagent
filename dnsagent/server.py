@@ -75,11 +75,7 @@ class MyDNSServerFactory(DNSServerFactory):
             if C{protocol} is a stream protocol.
         @type address: L{tuple} or L{None}
         """
-        if address is None:
-            protocol.writeMessage(message)
-        else:
-            protocol.writeMessage(message, address)
-
+        protocol.writeMessage(message, address)
         logger.info(
             '[%d]reply: %r, cost: %.1f ms', message.id,
             (message.answers, message.authority, message.additional),
