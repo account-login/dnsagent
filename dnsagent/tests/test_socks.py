@@ -13,7 +13,6 @@ from twisted.internet.error import CannotListenError
 from twisted.internet.protocol import DatagramProtocol, Protocol, ServerFactory
 from twisted.internet.endpoints import TCP4ClientEndpoint, connectProtocol
 
-from dnsagent.app import init_log, enable_log
 from dnsagent.socks import (
     read_socks_host, encode_socks_host, BadSocksHost, InsufficientData,
     UDPRelayPacket, BadUDPRelayPacket, UDPRelayProtocol, UDPRelayTransport,
@@ -21,8 +20,6 @@ from dnsagent.socks import (
 )
 
 
-init_log()
-enable_log()
 logger = logging.getLogger(__name__)
 
 

@@ -5,11 +5,12 @@ from twisted.names import dns
 from twisted.python.failure import Failure
 from twisted.trial import unittest
 
-from dnsagent.app import enable_log
+from dnsagent.app import init_log, enable_log
 from dnsagent.utils import rrheader_to_ip
 from dnsagent.resolver.base import MyResolverBase
 
 
+init_log()
 enable_log()
 
 
