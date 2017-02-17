@@ -443,8 +443,8 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
     ss_client_host = '127.0.0.30'
     ss_client_port = 3300 + random.randrange(100)
     ss_passwd = '123'
-    service_host = '127.0.0.40'
-    service_port = 4400 + random.randrange(100)
+    service_host = '127.0.0.10'
+    service_port = 1100 + random.randrange(100)
 
     @classmethod
     def setUpClass(cls):
