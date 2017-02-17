@@ -2,8 +2,9 @@ import struct
 import subprocess
 from io import BytesIO
 from ipaddress import ip_address
-
 import logging
+import random
+
 import pytest
 from twisted.trial import unittest
 from twisted.python.failure import Failure
@@ -435,14 +436,15 @@ class TestUDPRelayWithFakeServer(BaseTestUDPRelayIntegrated):
         return defer.DeferredList(dl)
 
 
+# noinspection PyAttributeOutsideInit
 class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
     ss_server_host = '127.0.0.20'
-    ss_server_port = 2222
+    ss_server_port = 2200 + random.randrange(100)
     ss_client_host = '127.0.0.30'
-    ss_client_port = 3333
+    ss_client_port = 3300 + random.randrange(100)
     ss_passwd = '123'
     service_host = '127.0.0.40'
-    service_port = 4444
+    service_port = 4400 + random.randrange(100)
 
     @classmethod
     def setUpClass(cls):
@@ -455,8 +457,7 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
             '-b', cls.ss_client_host, '-l', str(cls.ss_client_port), '-k', cls.ss_passwd,
         ])
 
-        cls.proxy_host = cls.ss_client_host
-        cls.proxy_port = cls.ss_client_port
+        cls.proxy_host, cls.proxy_port = cls.ss_client_host, cls.ss_client_port
 
     @classmethod
     def tearDownClass(cls):
