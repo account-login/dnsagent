@@ -384,7 +384,8 @@ class BaseTestUDPRelayIntegrated(unittest.TestCase):
     def setup_socks5_client(self):
         def proxy_connected(ignore):
             assert not isinstance(ignore, Failure)
-            self.ctrl_proto.get_udp_relay().addBoth(got_relay)
+            d = self.ctrl_proto.get_udp_relay()
+            d.addCallbacks(got_relay, self.relay_done.errback)
 
         def got_relay(relay):
             assert isinstance(relay, UDPRelay)
@@ -397,7 +398,7 @@ class BaseTestUDPRelayIntegrated(unittest.TestCase):
         )
         self.ctrl_proto = Socks5ControlProtocol()
         ctrl_connected = connectProtocol(proxy_endpoint, self.ctrl_proto)
-        ctrl_connected.addBoth(proxy_connected)
+        ctrl_connected.addCallbacks(proxy_connected, self.relay_done.errback)
 
     def tearDown(self):
         return self.relay.stop()
