@@ -13,11 +13,14 @@ from twisted.internet.error import CannotListenError
 from twisted.internet.protocol import DatagramProtocol, Protocol, ServerFactory
 from twisted.internet.endpoints import TCP4ClientEndpoint, connectProtocol
 
+from dnsagent.app import App
+from dnsagent.resolver.basic import ResolverOverSocks
 from dnsagent.socks import (
     read_socks_host, encode_socks_host, BadSocksHost, InsufficientData,
     UDPRelayPacket, BadUDPRelayPacket, UDPRelayProtocol, UDPRelayTransport,
     Socks5ControlProtocol, UDPRelay, get_udp_relay,
 )
+from dnsagent.utils import rrheader_to_ip
 
 
 logger = logging.getLogger(__name__)
@@ -444,6 +447,10 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
     service_host = '127.0.0.10'
     service_port = 1100 + random.randrange(100)
 
+    # ss_server_port = 2222
+    # ss_client_port = 3333
+    # service_port = 1111
+
     @classmethod
     def setUpClass(cls):
         cls.ss_server = subprocess.Popen([
@@ -482,6 +489,38 @@ class TestGetUDPRelayWithSS(TestUDPRelayWithSS):
             (self.proxy_host, self.proxy_port), reactor=self.reactor,
         )
         self.relay_done.addCallback(lambda relay: setattr(self, 'relay', relay))
+
+
+class TestResolverOverSocks(TestUDPRelayWithSS):
+    def setUp(self):
+        self.resolver = ResolverOverSocks(
+            servers=[(self.service_host, self.service_port)],
+            socks_proxy_addr=(self.proxy_host, self.proxy_port),
+        )
+        return super().setUp()
+
+    def setup_target_service(self):
+        from dnsagent.config import server, hosts
+        self.app = App()
+        self.mapping = dict(asdf='1.2.3.4', b='::1')
+        server_info = server(
+            hosts(self.mapping), port=self.service_port, interface=self.service_host,
+        )
+        self.app.start(server_info)
+
+    def setup_socks5_client(self):
+        self.relay_done = defer.succeed(None)
+
+    def tearDown(self):
+        return self.app.stop()
+
+    def test_run(self):
+        def check_a(result):
+            ans, add, ns = result
+            assert [ rrheader_to_ip(rr) for rr in ans ] == [ ip_address('1.2.3.4') ]
+            assert add == ns == []
+
+        return self.resolver.lookupAddress('asdf', timeout=[1]).addBoth(check_a)
 
 
 class Reverser(DatagramProtocol):

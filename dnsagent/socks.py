@@ -18,6 +18,9 @@ from twisted.internet import defer
 from zope.interface import implementer
 
 
+# TODO: timeout?
+
+
 logger = logging.getLogger(__name__)
 
 
