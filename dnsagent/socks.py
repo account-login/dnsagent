@@ -495,13 +495,19 @@ class Socks5ControlProtocol(Protocol):
 
     def dataReceived(self, data):
         self.data += data
-        # TODO: loop
-        if self.status == 'greeted':
-            self.check_greet_reply()
-        elif self.status == 'udp_req':
-            self.check_udp_associate_reply()
-        else:
-            logger.error('unexpected server data: %r', data)
+
+        while True:
+            data_len = len(self.data)
+            if self.status == 'greeted':
+                self.check_greet_reply()
+            elif self.status == 'udp_req':
+                self.check_udp_associate_reply()
+            else:
+                logger.error('unexpected server data: %r', data)
+
+            # insufficient data (self.data not touched) or protocol failed (self.data is b'')
+            if len(self.data) == 0 or len(self.data) == data_len:
+                break
 
 
 def get_client_endpoint(reactor, addr: Tuple[str, int]):
