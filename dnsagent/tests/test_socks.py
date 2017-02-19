@@ -439,12 +439,12 @@ class TestUDPRelayWithFakeServer(BaseTestUDPRelayIntegrated):
 
 # noinspection PyAttributeOutsideInit
 class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
-    ss_server_host = '127.0.0.20'
+    ss_server_host = '127.0.0.2'
     ss_server_port = 2200 + random.randrange(100)
-    ss_client_host = '127.0.0.30'
+    ss_client_host = '127.0.0.3'
     ss_client_port = 3300 + random.randrange(100)
     ss_passwd = '123'
-    service_host = '127.0.0.10'
+    service_host = '127.0.0.1'
     service_port = 1100 + random.randrange(100)
 
     # ss_server_port = 2222
