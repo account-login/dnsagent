@@ -15,5 +15,5 @@ install:
 
 # command to run tests
 script:
-  pytest -s --verbose --cov=dnsagent dnsagent/tests/
-  && codecov
+  - pytest -s --verbose --cov=dnsagent dnsagent/tests/
+  - codecov
