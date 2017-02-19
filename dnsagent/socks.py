@@ -383,6 +383,7 @@ class Socks5ControlProtocol(Protocol):
         self.udp_relay.stop()
 
     def greet(self):
+        assert self.status == 'init'
         data = (
             b'\x05'     # version
             + b'\x01'   # number of authentication methods supported
@@ -393,6 +394,8 @@ class Socks5ControlProtocol(Protocol):
         logger.debug('socks5 greeted')
 
     def check_greet_reply(self):
+        assert self.status == 'greeted'
+
         def fail():
             self.data = b''
             self.status = 'failed'
@@ -419,6 +422,7 @@ class Socks5ControlProtocol(Protocol):
         self.auth_defer.callback(self)
 
     def request_udp_associate(self, client_host: SocksHost, client_port: int) -> defer.Deferred:
+        assert self.status == 'authed'
         data = (
             b'\x05'     # version
             + b'\x03'   # udp associate
@@ -433,6 +437,8 @@ class Socks5ControlProtocol(Protocol):
         return self.request_defer
 
     def check_udp_associate_reply(self):
+        assert self.status == 'udp_req'
+
         def fail(exc_value=None):
             exc_value = exc_value or Exception('udp associate: bad reply')
             self.data = b''
