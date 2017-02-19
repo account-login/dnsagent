@@ -171,20 +171,20 @@ class TestSocks5ControlProtocol(unittest.TestCase):
         self.auth_result = None
 
     def feed(self, data: bytes, expected_status: str):
-        assert self.ctrl_proto.status == expected_status
+        assert self.ctrl_proto.state == expected_status
         for i in range(len(data)):
             self.ctrl_proto.dataReceived(b'')
-            assert self.ctrl_proto.status == expected_status
+            assert self.ctrl_proto.state == expected_status
             self.ctrl_proto.dataReceived(data[i:(i + 1)])
             if i < len(data) - 1:
-                assert self.ctrl_proto.status == expected_status
+                assert self.ctrl_proto.state == expected_status
 
     def test_greeting_success(self):
-        assert self.ctrl_proto.status == 'greeted'
+        assert self.ctrl_proto.state == 'greeted'
         assert self.transport.write_logs.pop() == (b'\x05\x01\x00', None)
 
         self.feed(b'\x05\x00', 'greeted')
-        assert self.ctrl_proto.status == 'authed'
+        assert self.ctrl_proto.state == 'authed'
         assert self.auth_result is self.ctrl_proto
         assert self.ctrl_proto.data == b''
 
@@ -196,14 +196,14 @@ class TestSocks5ControlProtocol(unittest.TestCase):
 
     def _run_greeting_failure_test(self, data: bytes):
         self.feed(data, 'greeted')
-        assert self.ctrl_proto.status == 'failed'
+        assert self.ctrl_proto.state == 'failed'
         assert isinstance(self.auth_result, Failure)
         assert self.ctrl_proto.data == b''
 
     def test_udp_associate_request(self):
         self.ctrl_proto.dataReceived(b'\x05\x00')
         d = self.ctrl_proto.request_udp_associate(ip_address('1.2.3.4'), 0x1234)
-        assert self.ctrl_proto.status == 'udp_req'
+        assert self.ctrl_proto.state == 'udp_req'
         assert self.transport.write_logs.pop() == (b'\x05\x03\0\x01\1\2\3\4\x12\x34', None)
         assert d is self.ctrl_proto.request_defer
 
@@ -211,7 +211,7 @@ class TestSocks5ControlProtocol(unittest.TestCase):
         self.ctrl_proto.dataReceived(b'\x05\x00')
         d = self.ctrl_proto.request_udp_associate(ip_address('1.2.3.4'), 0x1234)
         self.feed(b'\5\0\0\x01\2\3\4\5\x23\x45', 'udp_req')
-        assert self.ctrl_proto.status == 'success'
+        assert self.ctrl_proto.state == 'success'
 
         def udp_reqed(arg):
             assert arg == (ip_address('2.3.4.5'), 0x2345)
@@ -239,7 +239,7 @@ class TestSocks5ControlProtocol(unittest.TestCase):
 
         self.ctrl_proto.dataReceived(data)
         assert d.called
-        assert self.ctrl_proto.status == status
+        assert self.ctrl_proto.state == status
         return d
 
 

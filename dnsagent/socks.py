@@ -353,7 +353,7 @@ class UDPRelay:
 class Socks5ControlProtocol(Protocol):
     def __init__(self):
         self.data = b''
-        self.status = 'init'
+        self.state = 'init'
         self.auth_defer = defer.Deferred()
         self.request_defer = None   # type: Optional[defer.Deferred]
         self.udp_relay = UDPRelay(self)
@@ -374,31 +374,31 @@ class Socks5ControlProtocol(Protocol):
         self.greet()
 
     def connectionLost(self, reason=connectionDone):
-        if self.status == 'greeted':
+        if self.state == 'greeted':
             self.auth_defer.errback(reason)
-        elif self.status == 'udp_req':
+        elif self.state == 'udp_req':
             self.request_defer.errback(reason)
 
-        self.status = 'failed'
+        self.state = 'failed'
         self.udp_relay.stop()
 
     def greet(self):
-        assert self.status == 'init'
+        assert self.state == 'init'
         data = (
             b'\x05'     # version
             + b'\x01'   # number of authentication methods supported
             + b'\x00'   # no authentication
         )
         self.transport.write(data)
-        self.status = 'greeted'
+        self.state = 'greeted'
         logger.debug('socks5 greeted')
 
     def check_greet_reply(self):
-        assert self.status == 'greeted'
+        assert self.state == 'greeted'
 
         def fail():
             self.data = b''
-            self.status = 'failed'
+            self.state = 'failed'
             self.auth_defer.errback(Failure(Exception('greeting failed')))
 
         if len(self.data) < 2:
@@ -417,12 +417,12 @@ class Socks5ControlProtocol(Protocol):
             return
 
         self.data = self.data[2:]
-        self.status = 'authed'
+        self.state = 'authed'
         logger.debug('socks5 authed')
         self.auth_defer.callback(self)
 
     def request_udp_associate(self, client_host: SocksHost, client_port: int) -> defer.Deferred:
-        assert self.status == 'authed'
+        assert self.state == 'authed'
         data = (
             b'\x05'     # version
             + b'\x03'   # udp associate
@@ -431,18 +431,18 @@ class Socks5ControlProtocol(Protocol):
             + struct.pack('!H', client_port)    # DST.PORT
         )
         self.transport.write(data)
-        self.status = 'udp_req'
+        self.state = 'udp_req'
         assert self.request_defer is None
         self.request_defer = defer.Deferred()
         return self.request_defer
 
     def check_udp_associate_reply(self):
-        assert self.status == 'udp_req'
+        assert self.state == 'udp_req'
 
         def fail(exc_value=None):
             exc_value = exc_value or Exception('udp associate: bad reply')
             self.data = b''
-            self.status = 'failed'
+            self.state = 'failed'
             self.request_defer.errback(Failure(exc_value))
 
         bio = BytesIO(self.data)
@@ -484,12 +484,12 @@ class Socks5ControlProtocol(Protocol):
         if rep != b'\x00':
             logger.error('non-success reply: %r', rep)
             self.data = bio.read()
-            self.status = 'req_failed'
+            self.state = 'req_failed'
             self.request_defer.errback(Failure(Exception('udp associate: server rejected')))
             return
 
         self.data = bio.read()
-        self.status = 'success'
+        self.state = 'success'
         logger.debug('socks5 udp associate: %r', (bind_addr, bind_port))
         self.request_defer.callback((bind_addr, bind_port))
 
@@ -498,9 +498,9 @@ class Socks5ControlProtocol(Protocol):
 
         while True:
             data_len = len(self.data)
-            if self.status == 'greeted':
+            if self.state == 'greeted':
                 self.check_greet_reply()
-            elif self.status == 'udp_req':
+            elif self.state == 'udp_req':
                 self.check_udp_associate_reply()
             else:
                 logger.error('unexpected server data: %r', data)
