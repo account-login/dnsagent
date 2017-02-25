@@ -446,6 +446,9 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
     service_host = '127.0.0.40'
     service_port = 4444
 
+    ss_server = None
+    ss_local = None
+
     def setUp(self):
         d = defer.Deferred()
         ss_d = self.setup_ss()
@@ -454,20 +457,25 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
         ).addErrback(d.errback)
         return d
 
-    def setup_ss(self):
-        self.ss_server = subprocess.Popen([
-            'ssserver', '-s', self.ss_server_host, '-p', str(self.ss_server_port),
-            '-k', self.ss_passwd, '--forbidden-ip', '',
-        ])
-        self.ss_local = subprocess.Popen([
-            'sslocal', '-s', self.ss_server_host, '-p', str(self.ss_server_port),
-            '-b', self.ss_client_host, '-l', str(self.ss_client_port), '-k', self.ss_passwd,
-        ])
+    @classmethod
+    def setup_ss(cls):
+        if cls.ss_server is None:
+            cls.ss_server = subprocess.Popen([
+                'ssserver', '-s', cls.ss_server_host, '-p', str(cls.ss_server_port),
+                '-k', cls.ss_passwd, '--forbidden-ip', '',
+            ])
+            cls.ss_local = subprocess.Popen([
+                'sslocal', '-s', cls.ss_server_host, '-p', str(cls.ss_server_port),
+                '-b', cls.ss_client_host, '-l', str(cls.ss_client_port), '-k', cls.ss_passwd,
+            ])
 
-        self.proxy_host, self.proxy_port = self.ss_client_host, self.ss_client_port
-        return self.wait_for_ss()
+            cls.proxy_host, cls.proxy_port = cls.ss_client_host, cls.ss_client_port
+            return cls.wait_for_ss()
+        else:
+            return defer.succeed(None)
 
-    def wait_for_ss(self, times=10, timeout=0.2, d=None):
+    @classmethod
+    def wait_for_ss(cls, times=20, timeout=0.2, d=None):
         def connected(result):
             protocol.transport.loseConnection()
             d.callback(None)
@@ -477,7 +485,7 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
             logger.debug('testing sslocal failed: times=%d', times)
             reactor.callLater(
                 timeout,
-                self.wait_for_ss, times=(times - 1), timeout=timeout, d=d,
+                cls.wait_for_ss, times=(times - 1), timeout=timeout, d=d,
             )
 
         from twisted.internet import reactor
@@ -489,7 +497,7 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
             protocol = Protocol()
             connect_d = connectProtocol(
                 get_client_endpoint(
-                    reactor, (self.proxy_host, self.proxy_port), timeout=timeout),
+                    reactor, (cls.proxy_host, cls.proxy_port), timeout=timeout),
                 protocol,
             )
             connect_d.addCallbacks(connected, failed)
@@ -504,14 +512,15 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
             self.service_port, Reverser(), interface=self.service_host,
         )
 
-    def shutdown_ss(self):
-        self.ss_server.kill()
-        self.ss_local.kill()
-        self.ss_server.communicate()
-        self.ss_local.communicate()
+    @classmethod
+    def shutdown_ss(cls):
+        # FIXME: kill process tree
+        cls.ss_server.kill()
+        cls.ss_local.kill()
+        cls.ss_server.communicate()
+        cls.ss_local.communicate()
 
     def tearDown(self):
-        self.shutdown_ss()
         return defer.DeferredList([
             super().tearDown(),
             defer.maybeDeferred(self.reverser_transport.stopListening)
@@ -550,7 +559,6 @@ class TestResolverOverSocks(TestUDPRelayWithSS):
         self.relay_done = defer.succeed(None)
 
     def tearDown(self):
-        self.shutdown_ss()
         return self.app.stop()
 
     def test_run(self):
@@ -580,6 +588,10 @@ class Greeter(DatagramProtocol):
 
     def datagramReceived(self, datagram, addr):
         self.d.callback(datagram)
+
+
+def tearDownModule():
+    TestUDPRelayWithSS.shutdown_ss()
 
 
 del BaseTestUDPRelayIntegrated
