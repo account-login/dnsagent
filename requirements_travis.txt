@@ -6,3 +6,4 @@ coloredlogs
 
 # test depends
 shadowsocks
+psutil

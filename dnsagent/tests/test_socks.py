@@ -4,6 +4,7 @@ from io import BytesIO
 from ipaddress import ip_address
 import logging
 
+import psutil
 import pytest
 from twisted.trial import unittest
 from twisted.python.failure import Failure
@@ -514,11 +515,19 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
 
     @classmethod
     def shutdown_ss(cls):
-        # FIXME: kill process tree
-        cls.ss_server.kill()
-        cls.ss_local.kill()
-        cls.ss_server.communicate()
-        cls.ss_local.communicate()
+        def kill_proc_tree(pid):
+            parent = psutil.Process(pid)
+            children = parent.children(recursive=True)
+            for child in children:
+                child.kill()
+            psutil.wait_procs(children, timeout=2)
+
+            parent.kill()
+            parent.wait(2)
+
+        for popen in (cls.ss_server, cls.ss_local):
+            if popen.returncode is None:
+                kill_proc_tree(popen.pid)
 
     def tearDown(self):
         return defer.DeferredList([
