@@ -3,7 +3,6 @@ import subprocess
 from io import BytesIO
 from ipaddress import ip_address
 import logging
-import random
 
 import pytest
 from twisted.trial import unittest
@@ -18,7 +17,7 @@ from dnsagent.resolver.basic import ResolverOverSocks
 from dnsagent.socks import (
     read_socks_host, encode_socks_host, BadSocksHost, InsufficientData,
     UDPRelayPacket, BadUDPRelayPacket, UDPRelayProtocol, UDPRelayTransport,
-    Socks5ControlProtocol, UDPRelay, get_udp_relay,
+    Socks5ControlProtocol, UDPRelay, get_udp_relay, get_client_endpoint,
 )
 from dnsagent.utils import rrheader_to_ip
 
@@ -439,35 +438,63 @@ class TestUDPRelayWithFakeServer(BaseTestUDPRelayIntegrated):
 
 # noinspection PyAttributeOutsideInit
 class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
-    ss_server_host = '127.0.0.2'
-    ss_server_port = 2200 + random.randrange(100)
-    ss_client_host = '127.0.0.3'
-    ss_client_port = 3300 + random.randrange(100)
+    ss_server_host = '127.0.0.20'
+    ss_server_port = 2222
+    ss_client_host = '127.0.0.30'
+    ss_client_port = 3333
     ss_passwd = '123'
-    service_host = '127.0.0.1'
-    service_port = 1100 + random.randrange(100)
+    service_host = '127.0.0.40'
+    service_port = 4444
 
-    # ss_server_port = 2222
-    # ss_client_port = 3333
-    # service_port = 1111
+    def setUp(self):
+        d = defer.Deferred()
+        ss_d = self.setup_ss()
+        ss_d.addCallback(
+            lambda ignore: super(TestUDPRelayWithSS, self).setUp().chainDeferred(d)
+        ).addErrback(d.errback)
+        return d
 
-    @classmethod
-    def setUpClass(cls):
-        cls.ss_server = subprocess.Popen([
-            'ssserver', '-s', cls.ss_server_host, '-p', str(cls.ss_server_port),
-            '-k', cls.ss_passwd, '--forbidden-ip', '',
+    def setup_ss(self):
+        self.ss_server = subprocess.Popen([
+            'ssserver', '-s', self.ss_server_host, '-p', str(self.ss_server_port),
+            '-k', self.ss_passwd, '--forbidden-ip', '',
         ])
-        cls.ss_local = subprocess.Popen([
-            'sslocal', '-s', cls.ss_server_host, '-p', str(cls.ss_server_port),
-            '-b', cls.ss_client_host, '-l', str(cls.ss_client_port), '-k', cls.ss_passwd,
+        self.ss_local = subprocess.Popen([
+            'sslocal', '-s', self.ss_server_host, '-p', str(self.ss_server_port),
+            '-b', self.ss_client_host, '-l', str(self.ss_client_port), '-k', self.ss_passwd,
         ])
 
-        cls.proxy_host, cls.proxy_port = cls.ss_client_host, cls.ss_client_port
+        self.proxy_host, self.proxy_port = self.ss_client_host, self.ss_client_port
+        return self.wait_for_ss()
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.ss_server.terminate()
-        cls.ss_local.terminate()
+    def wait_for_ss(self, times=10, timeout=0.2, d=None):
+        def connected(result):
+            protocol.transport.loseConnection()
+            d.callback(None)
+            return result
+
+        def failed(ignore):
+            logger.debug('testing sslocal failed: times=%d', times)
+            reactor.callLater(
+                timeout,
+                self.wait_for_ss, times=(times - 1), timeout=timeout, d=d,
+            )
+
+        from twisted.internet import reactor
+        d = d or defer.Deferred()
+
+        if times <= 0:
+            d.errback(Exception('sslocal not started'))
+        else:
+            protocol = Protocol()
+            connect_d = connectProtocol(
+                get_client_endpoint(
+                    reactor, (self.proxy_host, self.proxy_port), timeout=timeout),
+                protocol,
+            )
+            connect_d.addCallbacks(connected, failed)
+
+        return d
 
     def setup_socks5_server(self):
         pass
@@ -477,9 +504,18 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
             self.service_port, Reverser(), interface=self.service_host,
         )
 
+    def shutdown_ss(self):
+        self.ss_server.kill()
+        self.ss_local.kill()
+        self.ss_server.communicate()
+        self.ss_local.communicate()
+
     def tearDown(self):
-        dl = [ super().tearDown(), defer.maybeDeferred(self.reverser_transport.stopListening) ]
-        return defer.DeferredList(dl)
+        self.shutdown_ss()
+        return defer.DeferredList([
+            super().tearDown(),
+            defer.maybeDeferred(self.reverser_transport.stopListening)
+        ])
 
 
 # noinspection PyAttributeOutsideInit
@@ -493,11 +529,13 @@ class TestGetUDPRelayWithSS(TestUDPRelayWithSS):
 
 class TestResolverOverSocks(TestUDPRelayWithSS):
     def setUp(self):
-        self.resolver = ResolverOverSocks(
-            servers=[(self.service_host, self.service_port)],
-            socks_proxy_addr=(self.proxy_host, self.proxy_port),
-        )
-        return super().setUp()
+        def set_resolver(ignore):
+            self.resolver = ResolverOverSocks(
+                servers=[(self.service_host, self.service_port)],
+                socks_proxy_addr=(self.proxy_host, self.proxy_port),
+            )
+            return ignore
+        return super().setUp().addCallback(set_resolver)
 
     def setup_target_service(self):
         from dnsagent.config import server, hosts
@@ -512,6 +550,7 @@ class TestResolverOverSocks(TestUDPRelayWithSS):
         self.relay_done = defer.succeed(None)
 
     def tearDown(self):
+        self.shutdown_ss()
         return self.app.stop()
 
     def test_run(self):

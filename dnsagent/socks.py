@@ -510,17 +510,17 @@ class Socks5ControlProtocol(Protocol):
                 break
 
 
-def get_client_endpoint(reactor, addr: Tuple[str, int]):
+def get_client_endpoint(reactor, addr: Tuple[str, int], **kwargs):
     host, port = addr
     try:
         ipobj = ip_address(host)
     except ValueError:
-        return HostnameEndpoint(reactor, host.encode(), port)
+        return HostnameEndpoint(reactor, host.encode(), port, **kwargs)
     else:
         if isinstance(ipobj, IPv4Address):
-            return TCP4ClientEndpoint(reactor, host, port)
+            return TCP4ClientEndpoint(reactor, host, port, **kwargs)
         else:
-            return TCP6ClientEndpoint(reactor, host, port)
+            return TCP6ClientEndpoint(reactor, host, port, **kwargs)
 
 
 def get_udp_relay(proxy_addr, reactor=None):
