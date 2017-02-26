@@ -16,7 +16,8 @@ from twisted.internet.endpoints import TCP4ClientEndpoint, connectProtocol
 from dnsagent.app import App
 from dnsagent.resolver.basic import ResolverOverSocks
 from dnsagent.socks import (
-    read_socks_host, encode_socks_host, BadSocksHost, InsufficientData,
+    read_socks_host, encode_socks_host, SocksHost, BadSocksHost, InsufficientData,
+    read_socks5_reply, BadSocks5Reply,
     UDPRelayPacket, BadUDPRelayPacket, UDPRelayProtocol, UDPRelayTransport,
     Socks5ControlProtocol, UDPRelay, get_udp_relay, get_client_endpoint,
 )
@@ -67,6 +68,24 @@ def test_udp_packet_encode():
     assert UDPRelayPacket(ip_address('127.0.0.1'), 0xabcd, b'\xff\xff').dumps() == (
         b'\0\0\0' + encode_socks_host(ip_address('127.0.0.1')) + b'\xab\xcd' + b'\xff\xff'
     )
+
+
+def test_read_socks5_reply():
+    def E(data, exc_type):
+        with pytest.raises(exc_type):
+            read_socks5_reply(BytesIO(data))
+
+    def R(data: bytes, reply: int, host: SocksHost, port: int):
+        assert read_socks5_reply(BytesIO(data)) == (reply, host, port)
+
+    data = b'\5\1\0\1\x7f\0\0\1\x12\x34'
+    for i in range(len(data) - 1):
+        E(data[:i], InsufficientData)
+    R(data, 1, ip_address('127.0.0.1'), 0x1234)
+
+    E(b'\4\0\0\1\x7f\0\0\1\x12\x34', BadSocks5Reply)
+    E(b'\5\0\1\1\x7f\0\0\1\x12\x34', BadSocks5Reply)
+    E(b'\5\0\1\5\x7f\0\0\1\x12\x34', BadSocks5Reply)
 
 
 class FakeTransport:
@@ -600,7 +619,8 @@ class Greeter(DatagramProtocol):
 
 
 def tearDownModule():
-    TestUDPRelayWithSS.shutdown_ss()
+    if TestUDPRelayWithSS.ss_local is not None:
+        TestUDPRelayWithSS.shutdown_ss()
 
 
 del BaseTestUDPRelayIntegrated

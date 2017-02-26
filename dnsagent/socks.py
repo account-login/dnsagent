@@ -350,6 +350,37 @@ class UDPRelay:
         return self._stop_defer
 
 
+class BadSocks5Reply(Exception):
+    pass
+
+
+def read_socks5_reply(bio: BytesIO) -> Tuple[int, SocksHost, int]:
+    def read(n: int) -> bytes:
+        data = bio.read(n)
+        if len(data) != n:
+            raise InsufficientData
+        return data
+
+    ver = read(1)
+    if ver != b'\x05':
+        raise BadSocks5Reply('bad socks version: %r' % ver)
+
+    rep = int.from_bytes(read(1), 'big')
+
+    rsv = read(1)
+    if rsv != b'\x00':
+        raise BadSocks5Reply('RSV is not zero: %r' % rsv)
+
+    try:
+        bind_addr = read_socks_host(bio)    # may raise InsufficientData
+    except BadSocksHost as exc:
+        raise BadSocks5Reply(exc) from exc
+
+    bind_port, = struct.unpack('!H', read(2))
+
+    return rep, bind_addr, bind_port
+
+
 class Socks5ControlProtocol(Protocol):
     def __init__(self):
         self.data = b''
@@ -439,59 +470,26 @@ class Socks5ControlProtocol(Protocol):
     def check_udp_associate_reply(self):
         assert self.state == 'udp_req'
 
-        def fail(exc_value=None):
-            exc_value = exc_value or Exception('udp associate: bad reply')
+        bio = BytesIO(self.data)
+        try:
+            reply, bind_host, bind_port = read_socks5_reply(bio)
+        except InsufficientData:
+            pass
+        except BadSocks5Reply as exc:
+            logger.error('%r', exc)
             self.data = b''
             self.state = 'failed'
-            self.request_defer.errback(Failure(exc_value))
-
-        bio = BytesIO(self.data)
-
-        ver = bio.read(1)
-        if not ver:
-            return
-        if ver != b'\x05':
-            logger.error('bad socks version: %r', ver)
-            fail()
-            return
-
-        rep = bio.read(1)
-        if not rep:
-            return
-
-        rsv = bio.read(1)
-        if not rsv:
-            return
-        if rsv != b'\x00':
-            logger.error('bad socks reply. RSV: %r', rsv)
-            fail()
-            return
-
-        try:
-            bind_addr = read_socks_host(bio)
-        except InsufficientData:
-            return
-        except BadSocksHost as exc:
-            logger.error('bad socks reply. bad SocksHost.')
-            fail(exc)
-            return
-
-        bport = bio.read(2)
-        if len(bport) < 2:
-            return
-        bind_port, = struct.unpack('!H', bport)
-
-        if rep != b'\x00':
-            logger.error('non-success reply: %r', rep)
+            self.request_defer.errback(Failure(exc))
+        else:
             self.data = bio.read()
-            self.state = 'req_failed'
-            self.request_defer.errback(Failure(Exception('udp associate: server rejected')))
-            return
-
-        self.data = bio.read()
-        self.state = 'success'
-        logger.debug('socks5 udp associate: %r', (bind_addr, bind_port))
-        self.request_defer.callback((bind_addr, bind_port))
+            if reply != 0:
+                logger.error('non-success reply: %r', reply)
+                self.state = 'req_failed'
+                self.request_defer.errback(Failure(Exception('udp associate: server rejected')))
+            else:
+                self.state = 'success'
+                logger.debug('socks5 udp associate: %r', (bind_host, bind_port))
+                self.request_defer.callback((bind_host, bind_port))
 
     def dataReceived(self, data):
         self.data += data
