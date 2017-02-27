@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import IntEnum
 from ipaddress import IPv4Address, IPv6Address, ip_address
 import struct
 import socket
@@ -366,7 +366,7 @@ def read_socks5_reply(bio: BytesIO) -> Tuple[int, SocksHost, int]:
     if ver != b'\x05':
         raise BadSocks5Reply('bad socks version: %r' % ver)
 
-    rep = int.from_bytes(read(1), 'big')
+    rep, = struct.unpack('!B', read(1))
 
     rsv = read(1)
     if rsv != b'\x00':
@@ -382,7 +382,7 @@ def read_socks5_reply(bio: BytesIO) -> Tuple[int, SocksHost, int]:
     return rep, bind_addr, bind_port
 
 
-class Socks5Cmd(Enum):
+class Socks5Cmd(IntEnum):
     CONNECT = 1
     BIND = 2
     UDP_ASSOCIATE = 3
@@ -394,19 +394,17 @@ class Socks5ControlProtocol(Protocol):
         self.state = 'init'
         self.auth_defer = defer.Deferred()
         self.request_defer = None   # type: Optional[defer.Deferred]
-        self.udp_relay = UDPRelay(self)
+        self.udp_relay = None       # type: Optional[UDPRelay]
         self._udp_relay_defer = None
+        self.user_protocol = None   # type: Optional[Protocol]
 
-    def get_udp_relay(self):
-        if self._udp_relay_defer is not None:
-            return self._udp_relay_defer
-        else:
-            d = self._udp_relay_defer = defer.Deferred()
-            self.udp_relay.setup_relay().addCallbacks(
-                lambda ignore: d.callback(self.udp_relay),
-                d.errback,
-            )
-            return d
+    def get_udp_relay(self) -> defer.Deferred:
+        if self._udp_relay_defer is None:
+            self.udp_relay = UDPRelay(self)
+            self._udp_relay_defer = self.udp_relay.setup_relay()
+            self._udp_relay_defer.addCallback(lambda ignore: self.udp_relay)
+
+        return self._udp_relay_defer
 
     def connectionMade(self):
         self.greet()
@@ -414,8 +412,9 @@ class Socks5ControlProtocol(Protocol):
     def connectionLost(self, reason=connectionDone):
         if self.state == 'greeted':
             self.auth_defer.errback(reason)
-        elif self.state == 'udp_req':
+        elif self.state in ('udp_req', 'tcp_req'):
             self.request_defer.errback(reason)
+        # TODO: self.user_protocol
 
         self.state = 'failed'
         self.udp_relay.stop()
@@ -502,6 +501,12 @@ class Socks5ControlProtocol(Protocol):
     def check_udp_associate_reply(self):
         self._check_reply(Socks5Cmd.UDP_ASSOCIATE, 'udp_req', 'udp_relay')
 
+    def request_tcp_connect(self, dst_host: SocksHost, dst_port: int):
+        return self._make_request(Socks5Cmd.CONNECT, dst_host, dst_port, 'tcp_req')
+
+    def check_tcp_connect_reply(self):
+        self._check_reply(Socks5Cmd.CONNECT, 'tcp_req', 'tcp_relay')
+
     def dataReceived(self, data):
         self.data += data
 
@@ -511,6 +516,11 @@ class Socks5ControlProtocol(Protocol):
                 self.check_greet_reply()
             elif self.state == 'udp_req':
                 self.check_udp_associate_reply()
+            elif self.state == 'tcp_req':
+                self.check_tcp_connect_reply()
+            elif self.state == 'tcp_relay' and self.user_protocol is not None:
+                self.user_protocol.dataReceived(self.data)
+                self.data = b''
             else:
                 logger.error('unexpected server data: %r', data)
 

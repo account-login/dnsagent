@@ -116,6 +116,14 @@ class FakeDatagramProtocol(DatagramProtocol):
         self.data_logs.append((datagram, addr))
 
 
+class FakeProtocol(Protocol):
+    def __init__(self):
+        self.recv_logs = []
+
+    def dataReceived(self, data):
+        self.recv_logs.append(data)
+
+
 def test_udp_relay_protocol():
     relay_proto = UDPRelayProtocol()
     tr = FakeTransport()
@@ -189,14 +197,14 @@ class TestSocks5ControlProtocol(unittest.TestCase):
         self.ctrl_proto.auth_defer.addBoth(authed)
         self.auth_result = None
 
-    def feed(self, data: bytes, expected_status: str):
-        assert self.ctrl_proto.state == expected_status
+    def feed(self, data: bytes, expected_state: str):
+        assert self.ctrl_proto.state == expected_state
         for i in range(len(data)):
             self.ctrl_proto.dataReceived(b'')
-            assert self.ctrl_proto.state == expected_status
+            assert self.ctrl_proto.state == expected_state
             self.ctrl_proto.dataReceived(data[i:(i + 1)])
             if i < len(data) - 1:
-                assert self.ctrl_proto.state == expected_status
+                assert self.ctrl_proto.state == expected_state
 
     def test_greeting_success(self):
         assert self.ctrl_proto.state == 'greeted'
@@ -219,46 +227,89 @@ class TestSocks5ControlProtocol(unittest.TestCase):
         assert isinstance(self.auth_result, Failure)
         assert self.ctrl_proto.data == b''
 
-    def test_udp_associate_request(self):
-        self.ctrl_proto.dataReceived(b'\x05\x00')
-        d = self.ctrl_proto.request_udp_associate(ip_address('1.2.3.4'), 0x1234)
-        assert self.ctrl_proto.state == 'udp_req'
-        assert self.transport.write_logs.pop() == (b'\x05\x03\0\x01\1\2\3\4\x12\x34', None)
-        assert d is self.ctrl_proto.request_defer
-
     def test_udp_associate_success(self):
-        self.ctrl_proto.dataReceived(b'\x05\x00')
-        d = self.ctrl_proto.request_udp_associate(ip_address('1.2.3.4'), 0x1234)
-        self.feed(b'\5\0\0\x01\2\3\4\5\x23\x45', 'udp_req')
-        assert self.ctrl_proto.state == 'udp_relay'
+        d = self._run_request(
+            method=Socks5ControlProtocol.request_udp_associate,
+            args=(ip_address('1.2.3.4'), 0x1234),
+            state_after_req='udp_req', req=b'\x05\x03\0\x01\1\2\3\4\x12\x34',
+            resp=b'\5\0\0\x01\2\3\4\5\x23\x45', state_after_resp='udp_relay',
+        )
 
         def udp_reqed(arg):
             assert arg == (ip_address('2.3.4.5'), 0x2345)
             assert self.ctrl_proto.data == b''
-
         return d.addBoth(udp_reqed)
 
+    def test_tcp_connect_success(self):
+        d = self._run_request(
+            method=Socks5ControlProtocol.request_tcp_connect,
+            args=(ip_address('1.2.3.4'), 0x1234),
+            state_after_req='tcp_req', req=b'\x05\x01\0\x01\1\2\3\4\x12\x34',
+            resp=b'\5\0\0\x01\2\3\4\5\x23\x45', state_after_resp='tcp_relay',
+        )
+
+        def tcp_reqed(arg):
+            assert arg == (ip_address('2.3.4.5'), 0x2345)
+            assert self.ctrl_proto.data == b''
+
+            user_proto = FakeProtocol()
+            self.ctrl_proto.user_protocol = user_proto
+            self.ctrl_proto.dataReceived(b'1234')
+            assert user_proto.recv_logs == [b'1234']
+
+        return d.addBoth(tcp_reqed)
+
+    def _run_request(self, method, args, state_after_req, req, resp, state_after_resp):
+        self.ctrl_proto.dataReceived(b'\x05\x00')
+
+        d = method(self.ctrl_proto, *args)
+        assert self.ctrl_proto.state == state_after_req
+        assert self.transport.write_logs.pop() == (req, None)
+        assert d is self.ctrl_proto.request_defer
+
+        self.feed(resp, state_after_req)
+        assert self.ctrl_proto.state == state_after_resp
+
+        return d
+
     def test_udp_associate_server_fail(self):
-        d = self._run_udp_associate_failure_test(b'\5\x01\0\x01\2\3\4\5\x23\x45', 'req_failed')
+        return self._run_request_server_fail(Socks5ControlProtocol.request_udp_associate)
+
+    def test_udp_associate_protocol_fail(self):
+        return self._run_request_protocol_fail(Socks5ControlProtocol.request_udp_associate)
+
+    def test_tcp_connect_server_fail(self):
+        return self._run_request_server_fail(Socks5ControlProtocol.request_tcp_connect)
+
+    def test_tcp_connect_protocol_fail(self):
+        return self._run_request_protocol_fail(Socks5ControlProtocol.request_tcp_connect)
+
+    def _run_request_server_fail(self, method):
+        d = self._run_request_failure(
+            method=method, args=(ip_address('1.2.3.4'), 0x1234),
+            data=b'\5\x01\0\x01\2\3\4\5\x23\x45', failed_state='req_failed',
+        )
         assert self.transport.connected
         return d
 
-    def test_udp_associate_protocol_fail(self):
-        d = self._run_udp_associate_failure_test(b'\5\0\0\x08\2\3\4\5\x23\x45', 'failed')
-        return d
+    def _run_request_protocol_fail(self, method):
+        return self._run_request_failure(
+            method=method, args=(ip_address('1.2.3.4'), 0x1234),
+            data=b'\5\0\0\x08\2\3\4\5\x23\x45', failed_state='failed',
+        )
 
-    def _run_udp_associate_failure_test(self, data, status):
-        def udp_reqed(arg):
+    def _run_request_failure(self, method, args, data, failed_state):
+        def requested(arg):
             assert isinstance(arg, Failure)
             assert self.ctrl_proto.data == b''
 
         self.ctrl_proto.dataReceived(b'\x05\x00')
-        d = self.ctrl_proto.request_udp_associate(ip_address('1.2.3.4'), 0x1234)
-        d.addBoth(udp_reqed)
+        d = method(self.ctrl_proto, *args)
+        d.addBoth(requested)
 
         self.ctrl_proto.dataReceived(data)
         assert d.called
-        assert self.ctrl_proto.state == status
+        assert self.ctrl_proto.state == failed_state
         return d
 
 
