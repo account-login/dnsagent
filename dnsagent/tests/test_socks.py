@@ -230,7 +230,7 @@ class TestSocks5ControlProtocol(unittest.TestCase):
         self.ctrl_proto.dataReceived(b'\x05\x00')
         d = self.ctrl_proto.request_udp_associate(ip_address('1.2.3.4'), 0x1234)
         self.feed(b'\5\0\0\x01\2\3\4\5\x23\x45', 'udp_req')
-        assert self.ctrl_proto.state == 'success'
+        assert self.ctrl_proto.state == 'udp_relay'
 
         def udp_reqed(arg):
             assert arg == (ip_address('2.3.4.5'), 0x2345)
@@ -541,8 +541,11 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
                 child.kill()
             psutil.wait_procs(children, timeout=2)
 
-            parent.kill()
-            parent.wait(2)
+            try:
+                parent.kill()
+                parent.wait(2)
+            except Exception:
+                logger.exception('failed to kill process: %d', pid)
 
         for popen in (cls.ss_server, cls.ss_local):
             if popen.returncode is None:

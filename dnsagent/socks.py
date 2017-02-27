@@ -1,3 +1,4 @@
+from enum import Enum
 from ipaddress import IPv4Address, IPv6Address, ip_address
 import struct
 import socket
@@ -381,6 +382,12 @@ def read_socks5_reply(bio: BytesIO) -> Tuple[int, SocksHost, int]:
     return rep, bind_addr, bind_port
 
 
+class Socks5Cmd(Enum):
+    CONNECT = 1
+    BIND = 2
+    UDP_ASSOCIATE = 3
+
+
 class Socks5ControlProtocol(Protocol):
     def __init__(self):
         self.data = b''
@@ -452,23 +459,21 @@ class Socks5ControlProtocol(Protocol):
         logger.debug('socks5 authed')
         self.auth_defer.callback(self)
 
-    def request_udp_associate(self, client_host: SocksHost, client_port: int) -> defer.Deferred:
+    def _make_request(self, cmd: Socks5Cmd, dst_host: SocksHost, dst_port: int, next_state: str) \
+            -> defer.Deferred:
         assert self.state == 'authed'
         data = (
-            b'\x05'     # version
-            + b'\x03'   # udp associate
-            + b'\0'     # reserve
-            + encode_socks_host(client_host)    # DST.ADDR
-            + struct.pack('!H', client_port)    # DST.PORT
-        )
+            struct.pack('!BBB', 5, cmd.value, 0)    # ver, cmd, reserved
+            + encode_socks_host(dst_host) + struct.pack('!H', dst_port))
         self.transport.write(data)
-        self.state = 'udp_req'
+        self.state = next_state
+
         assert self.request_defer is None
         self.request_defer = defer.Deferred()
         return self.request_defer
 
-    def check_udp_associate_reply(self):
-        assert self.state == 'udp_req'
+    def _check_reply(self, cmd: Socks5Cmd, cur_state: str, next_state: str):
+        assert self.state == cur_state
 
         bio = BytesIO(self.data)
         try:
@@ -483,13 +488,19 @@ class Socks5ControlProtocol(Protocol):
         else:
             self.data = bio.read()
             if reply != 0:
-                logger.error('non-success reply: %r', reply)
+                logger.error('%s: non-success reply: %r', cmd, reply)
                 self.state = 'req_failed'
-                self.request_defer.errback(Failure(Exception('udp associate: server rejected')))
+                self.request_defer.errback(Failure(Exception('%s: server rejected' % cmd)))
             else:
-                self.state = 'success'
-                logger.debug('socks5 udp associate: %r', (bind_host, bind_port))
+                self.state = next_state
+                logger.debug('%s: %s:%d', cmd, bind_host, bind_port)
                 self.request_defer.callback((bind_host, bind_port))
+
+    def request_udp_associate(self, client_host: SocksHost, client_port: int):
+        return self._make_request(Socks5Cmd.UDP_ASSOCIATE, client_host, client_port, 'udp_req')
+
+    def check_udp_associate_reply(self):
+        self._check_reply(Socks5Cmd.UDP_ASSOCIATE, 'udp_req', 'udp_relay')
 
     def dataReceived(self, data):
         self.data += data
