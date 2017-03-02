@@ -9,22 +9,33 @@ import pytest
 from twisted.trial import unittest
 from twisted.python.failure import Failure
 from twisted.internet import defer
+from twisted.internet import address as taddress
 from twisted.internet.error import CannotListenError
-from twisted.internet.protocol import DatagramProtocol, Protocol, ServerFactory
-from twisted.internet.endpoints import TCP4ClientEndpoint, connectProtocol
+from twisted.internet.protocol import (
+    DatagramProtocol, Protocol, ServerFactory, connectionDone, ClientFactory,
+)
+from twisted.internet.endpoints import TCP4ClientEndpoint, TCP4ServerEndpoint, connectProtocol
 
 from dnsagent.app import App
 from dnsagent.resolver.basic import ResolverOverSocks
 from dnsagent.socks import (
     read_socks_host, encode_socks_host, SocksHost, BadSocksHost, InsufficientData,
-    read_socks5_reply, BadSocks5Reply,
+    Socks5Reply, BadSocks5Reply, to_twisted_addr,
     UDPRelayPacket, BadUDPRelayPacket, UDPRelayProtocol, UDPRelayTransport,
-    Socks5ControlProtocol, UDPRelay, get_udp_relay, get_client_endpoint,
+    Socks5ControlProtocol, Socks5Cmd, UDPRelay, get_udp_relay, get_client_endpoint,
+    TCPRelayConnector,
 )
 from dnsagent.utils import rrheader_to_ip
 
 
 logger = logging.getLogger(__name__)
+
+
+def test_to_twisted_addr():
+    assert to_twisted_addr('asdf', 1234) == taddress.HostnameAddress(b'asdf', 1234)
+    assert to_twisted_addr('asdf', 1234, type_='UDP') == taddress.HostnameAddress(b'asdf', 1234)
+    assert to_twisted_addr('1.2.3.4', 1234) == taddress.IPv4Address('TCP', '1.2.3.4', 1234)
+    assert to_twisted_addr('::1', 3456, type_='UDP') == taddress.IPv6Address('UDP', '::1', 3456)
 
 
 def test_read_socks_host():
@@ -70,13 +81,13 @@ def test_udp_packet_encode():
     )
 
 
-def test_read_socks5_reply():
+def test_socks5_reply_load():
     def E(data, exc_type):
         with pytest.raises(exc_type):
-            read_socks5_reply(BytesIO(data))
+            Socks5Reply.load(BytesIO(data))
 
     def R(data: bytes, reply: int, host: SocksHost, port: int):
-        assert read_socks5_reply(BytesIO(data)) == (reply, host, port)
+        assert Socks5Reply.load(BytesIO(data)) == Socks5Reply(reply, host, port)
 
     data = b'\5\1\0\1\x7f\0\0\1\x12\x34'
     for i in range(len(data) - 1):
@@ -88,10 +99,19 @@ def test_read_socks5_reply():
     E(b'\5\0\1\5\x7f\0\0\1\x12\x34', BadSocks5Reply)
 
 
+def test_socks5_reply_dumps():
+    def R(reply: int, host: SocksHost, port: int, answer: bytes):
+        assert Socks5Reply(reply, host, port).dumps() == answer
+
+    R(0, 'asdf', 0x1234, b'\5\0\0\3\4asdf\x12\x34')
+    R(1, ip_address('1.2.3.4'), 0x1234, b'\5\1\0\1\1\2\3\4\x12\x34')
+
+
 class FakeTransport:
-    def __init__(self):
+    def __init__(self, addr=('8.7.6.5', 8765)):
         self.write_logs = []
         self.connected = True
+        self.addr = addr
 
     def write(self, data, addr=None):
         self.write_logs.append((data, addr))
@@ -101,6 +121,9 @@ class FakeTransport:
         self.connected = False
 
     stopListening = loseConnection
+
+    def getHost(self):
+        return to_twisted_addr(*self.addr, type_='TCP')
 
     def poplogs(self):
         logs = self.write_logs
@@ -241,6 +264,13 @@ class TestSocks5ControlProtocol(unittest.TestCase):
         return d.addBoth(udp_reqed)
 
     def test_tcp_connect_success(self):
+        class FakeConnector:
+            def __init__(self, user_proto: Protocol):
+                self.user_protocol = user_proto
+
+            def data_received(self, data):
+                self.user_protocol.dataReceived(data)
+
         d = self._run_request(
             method=Socks5ControlProtocol.request_tcp_connect,
             args=(ip_address('1.2.3.4'), 0x1234),
@@ -253,7 +283,7 @@ class TestSocks5ControlProtocol(unittest.TestCase):
             assert self.ctrl_proto.data == b''
 
             user_proto = FakeProtocol()
-            self.ctrl_proto.user_protocol = user_proto
+            self.ctrl_proto.connector = FakeConnector(user_proto)
             self.ctrl_proto.dataReceived(b'1234')
             assert user_proto.recv_logs == [b'1234']
 
@@ -377,12 +407,48 @@ class TestUDPRelay(unittest.TestCase):
         return self.relay.stop()
 
 
-# noinspection PyAttributeOutsideInit
+class RelayProtocol(Protocol):
+    def __init__(self, other_transport):
+        self.other_transport = other_transport
+
+    def dataReceived(self, data):
+        self.other_transport.write(data)
+
+
+class Buffer:
+    def __init__(self):
+        self.data = b''
+
+    def read(self, n: int):
+        assert n > 0
+        if len(self.data) < n:
+            raise InsufficientData
+        else:
+            ret = self.data[:n]
+            self.data = self.data[n:]
+            return ret
+
+    def readall(self):
+        ret = self.data
+        self.data = b''
+        return ret
+
+    def append(self, data: bytes):
+        self.data += data
+
+    def __bool__(self):
+        return len(self.data) != 0
+
+
 class FakeSocks5ControlServerProtocol(Protocol):
-    def __init__(self, relay_address, reactor=None):
-        self.relay_host, self.relay_port = relay_address
-        self.relay_proto = FakeUDPRelayServerProtocol()
-        self.relay_server_port = None
+    def __init__(self, udp_relay_address, reactor=None):
+        self.udp_relay_host, self.udp_relay_port = udp_relay_address
+        self.udp_relay_proto = FakeUDPRelayServerProtocol()
+        self.udp_relay_server_port = None
+        self.tcp_relay_proto = None
+        self.buffer = Buffer()
+        self.state = None
+
         if reactor is None:
             from twisted.internet import reactor
         self.reactor = reactor
@@ -391,42 +457,98 @@ class FakeSocks5ControlServerProtocol(Protocol):
         self.state = 'init'
 
     def dataReceived(self, data):
+        self.buffer.append(data)
+        self.data_processing_loop()
+
+    def data_processing_loop(self):
+        while self.buffer:
+            try:
+                self.handle_data()
+            except InsufficientData:
+                break
+
+    def handle_data(self):
         if self.state == 'init':
-            assert len(data) == 3
+            self.buffer.read(3)
             self.transport.write(b'\5\0')
             self.state = 'authed'
         elif self.state == 'authed':
-            bio = BytesIO(data)
-            assert len(bio.read(3)) == 3
-            host = read_socks_host(bio)
-            port = struct.unpack('!H', bio.read(2))[0]
-            logger.info('client_host: %s, client_port: %d', host, port)
+            ver, cmd, rsv = struct.unpack('!BBB', self.buffer.read(3))
+            host = read_socks_host(self.buffer)  # raise InsufficientData
+            port, = struct.unpack('!H', self.buffer.read(2))
+            if cmd == Socks5Cmd.UDP_ASSOCIATE:
+                self.handle_udp_associate(host, port)
+            elif cmd == Socks5Cmd.CONNECT:
+                self.handle_tcp_connect(host, port)
+            else:
+                raise NotImplementedError
+        elif self.state == 'tcp_relay':
+            self.tcp_relay_proto.transport.write(self.buffer.readall())
+        else:
+            logger.error('fake server unexpected data: %r', self.buffer.data)
+            raise InsufficientData  # hacks
 
-            self.relay_server_port = self.reactor.listenUDP(
-                self.relay_port, self.relay_proto, interface=self.relay_host,
-            )
-            data = (
-                b'\5\0\0'
-                + encode_socks_host(ip_address(self.relay_host))
-                + struct.pack('!H', self.relay_port))
-            self.transport.write(data)
-            self.state = 'success'
+    def handle_udp_associate(self, client_host: SocksHost, client_port: int):
+        logger.info('fake server udp associate. client: %s:%d', client_host, client_port)
+
+        self.udp_relay_server_port = self.reactor.listenUDP(
+            self.udp_relay_port, self.udp_relay_proto, interface=self.udp_relay_host,
+        )
+        reply = Socks5Reply(0, self.udp_relay_host, self.udp_relay_port)
+        self.transport.write(reply.dumps())
+        self.state = 'udp_relay'
+
+    def handle_tcp_connect(self, host: SocksHost, port: int):
+        def connected(ignore):
+            taddr = self.tcp_relay_proto.transport.getHost()
+            reply = Socks5Reply(0, ip_address(taddr.host), taddr.port)
+            self.transport.write(reply.dumps())
+            self.state = 'tcp_relay'
+            self.data_processing_loop()    # state changed
+
+        def failed(failure):
+            logger.error('fake server tcp connect failed: %r', failure)
+            reply = Socks5Reply(1, ip_address('0.0.0.0'), 0)
+            self.transport.write(reply.dumps())
+            self.state = 'failed'
+            self.transport.loseConnection()
+
+        logger.info('fake server connect to: %s:%d', host, port)
+
+        endpoint = get_client_endpoint(self.reactor, (str(host), port))
+        self.tcp_relay_proto = RelayProtocol(self.transport)
+        d = connectProtocol(endpoint, self.tcp_relay_proto)
+        d.addCallbacks(connected, failed)
+
+        self.state = 'tcp_relay_setup'
+
+    def connectionLost(self, reason=connectionDone):
+        if self.tcp_relay_proto and self.tcp_relay_proto.transport:
+            self.tcp_relay_proto.transport.loseConnection()
+
+    def stop(self):
+        dl = []
+        if self.udp_relay_server_port:
+            dl.append(defer.maybeDeferred(self.udp_relay_server_port.stopListening))
+        if self.tcp_relay_proto and self.tcp_relay_proto.transport:
+            dl.append(defer.maybeDeferred(self.tcp_relay_proto.transport.loseConnection))
+        return defer.DeferredList(dl)
 
 
 # noinspection PyAttributeOutsideInit
 class FakeSocks5ControlServer(ServerFactory):
-    def __init__(self, relay_address):
-        self.relay_address = relay_address
+    def __init__(self, udp_relay_address):
+        self.udp_relay_address = udp_relay_address
 
     def buildProtocol(self, addr):
-        self.protocol_inst = FakeSocks5ControlServerProtocol(self.relay_address)
+        self.protocol_inst = FakeSocks5ControlServerProtocol(self.udp_relay_address)
         self.protocol_inst.factory = self
         return self.protocol_inst
 
 
 class FakeUDPRelayServerProtocol(DatagramProtocol):
     def datagramReceived(self, datagram, addr):
-        logger.info('relay received data from %r', addr)
+        logger.info('fake udp relay received data from %r', addr)
         packet = UDPRelayPacket.loads(datagram)
         data = bytes(reversed(packet.data))
         response = UDPRelayPacket(packet.host, packet.port, data)
@@ -498,11 +620,11 @@ class TestUDPRelayWithFakeServer(BaseTestUDPRelayIntegrated):
         self.service_host, self.service_port = '127.0.0.66', 6666
 
     def tearDown(self):
-        relay_server_port = self.server_ctrl_factory.protocol_inst.relay_server_port
+        server_ctrl_proto = self.server_ctrl_factory.protocol_inst
         dl = [
             super().tearDown(),
             defer.maybeDeferred(self.server_ctrl_port.stopListening),
-            defer.maybeDeferred(relay_server_port.stopListening)
+            server_ctrl_proto.stop(),
         ]
         return defer.DeferredList(dl)
 
@@ -652,24 +774,293 @@ class TestResolverOverSocks(TestUDPRelayWithSS):
         return self.resolver.lookupAddress('asdf', timeout=[1]).addBoth(check_a)
 
 
+class TestableTCPRelayConnector(TCPRelayConnector):
+    def _connect_control_protocol(self, errback):
+        assert self.ctrl_proto.transport is None
+        self.ctrl_proto.makeConnection(FakeTransport(addr=self.proxy_addr))
+
+
+class FakeClientFactory(ClientFactory):
+    protocol = FakeProtocol
+    connector = None
+    started = False
+    lost = False
+    failed = False
+
+    def startFactory(self):
+        self.started = True
+
+    def startedConnecting(self, connector):
+        self.connector = connector
+
+    def clientConnectionLost(self, connector, reason):
+        assert connector is self.connector
+        self.lost = True
+        logger.info('clientConnectionLost, reason=%r', reason)
+
+    def clientConnectionFailed(self, connector, reason):
+        assert connector is self.connector
+        self.failed = True
+        logger.error('clientConnectionFailed, reason=%r', reason)
+
+    def stopFactory(self):
+        self.started = False
+
+
+class ReconnectingFakeClientFactory(FakeClientFactory):
+    failed_count = 0
+    lost_count = 0
+
+    def clientConnectionFailed(self, connector, reason):
+        self.failed_count += 1
+        connector.connect()
+
+    def clientConnectionLost(self, connector, reason):
+        self.lost_count += 1
+        connector.connect()
+
+
+class TestTCPRelayConnector(unittest.TestCase):
+    def setUp(self):
+        self.factory = FakeClientFactory()
+        self.connector = TestableTCPRelayConnector(
+            '1.2.3.4', 1234, self.factory, ('4.3.2.1', 4321),
+        )
+
+    def test_run(self):
+        assert not self.factory.started
+        assert self.factory.connector is None
+        self.connector.connect()
+        assert self.factory.started                     # startFactory() called
+        assert self.factory.connector is self.connector # startedConnecting() called
+
+        ctrl_proto = self.connector.ctrl_proto  # type: Socks5ControlProtocol
+        assert ctrl_proto.transport.write_logs.pop() == (b'\5\1\0', None)
+
+        # authentication
+        ctrl_proto.dataReceived(b'\5\0')
+        assert ctrl_proto.transport.write_logs.pop() == (b'\5\1\0\1\1\2\3\4\x04\xd2', None)
+
+        # reply to CONNECT request
+        assert self.connector.user_proto.transport is None
+        ctrl_proto.dataReceived(Socks5Reply(0, ip_address('9.8.7.6'), 0x9876).dumps())
+        assert self.connector.user_proto.transport is ctrl_proto.transport
+
+        # send data through relay
+        ctrl_proto.dataReceived(b'asdf')
+        assert self.connector.user_proto.recv_logs.pop() == b'asdf'
+
+        # close connection
+        ctrl_proto.connectionLost(Failure(Exception('haha')))
+        assert self.factory.lost            # clientConnectionLost() called
+        assert not self.factory.started     # stopFactory() called
+
+    def test_server_rejected(self):
+        self.connector.connect()
+        self.connector.ctrl_proto.dataReceived(b'\5\0')
+        self.connector.ctrl_proto.dataReceived(
+            Socks5Reply(1, ip_address('9.8.7.6'), 0x9876).dumps()
+        )
+        assert self.factory.failed
+        assert not self.factory.started
+
+    def test_auth_failed(self):
+        self.connector.connect()
+        self.connector.ctrl_proto.dataReceived(b'\5\xff')
+        assert self.factory.failed
+        assert not self.factory.started
+
+    # TODO: test_connect_failed
+    # TODO: test factory.buildProtocol() returns None
+
+    def test_stopConnecting(self):
+        self.connector.connect()
+        self.connector.ctrl_proto.dataReceived(b'\5\0')
+        assert self.connector.state == 'connecting'
+
+        tr = self.connector.ctrl_proto.transport
+        self.connector.stopConnecting()
+        assert self.connector.state == 'disconnected'
+        assert self.connector.ctrl_proto.transport is self.connector.user_proto.transport is None
+        assert not tr.connected
+
+    def test_stopConecting_reconnect(self):
+        self.connector.connect()
+        self.connector.ctrl_proto.dataReceived(b'\5\0')
+        self.connector.stopConnecting()
+
+        # reconnect
+        self.connector.connect()
+        self.connector.ctrl_proto.dataReceived(b'\5\0')
+        self.connector.ctrl_proto.dataReceived(
+            Socks5Reply(0, ip_address('9.8.7.6'), 0x9876).dumps()
+        )
+        assert self.connector.state == 'connected'
+        assert self.connector.user_proto.transport is self.connector.ctrl_proto.transport
+
+    def test_reconnecting_from_client_factory(self):
+        self.factory = ReconnectingFakeClientFactory()
+        self.connector = TestableTCPRelayConnector(
+            '1.2.3.4', 1234, self.factory, ('4.3.2.1', 4321),
+        )
+        self.connector.connect()
+
+        # clientConnectionFailed()
+        self.connector.ctrl_proto.dataReceived(b'\5\xff')
+        assert self.factory.failed_count == 1
+        assert self.connector.state == 'connecting'
+        assert self.factory.started
+
+        self.connector.ctrl_proto.dataReceived(b'\5\0')
+        self.connector.ctrl_proto.dataReceived(
+            Socks5Reply(0, ip_address('9.8.7.6'), 0x9876).dumps()
+        )
+        assert self.connector.state == 'connected'
+
+        # clientConnectionLost()
+        self.connector.ctrl_proto.connectionLost(Failure(Exception('hahaha')))
+        assert self.factory.lost_count == 1
+        assert self.connector.state == 'connecting'
+        assert self.factory.started
+
+    def test_disconnect(self):
+        self.connector.connect()
+        self.connector.ctrl_proto.dataReceived(b'\5\0')
+        self.connector.ctrl_proto.dataReceived(
+            Socks5Reply(0, ip_address('9.8.7.6'), 0x9876).dumps()
+        )
+        assert self.connector.state == 'connected'
+
+        tr = self.connector.ctrl_proto.transport
+        self.connector.disconnect()
+        assert not tr.connected
+        assert self.connector.ctrl_proto.transport is self.connector.user_proto.transport is None
+
+
+class TestTCPRelayConnectorWithFakeServer(unittest.TestCase):
+    service_host = '127.0.0.100'
+    service_port = 10000
+    service_transport = None
+
+    server_host = '127.0.0.200'
+    server_port = 20000
+    server_transport = None
+
+    def setUp(self):
+        from twisted.internet import reactor
+        self.reactor = reactor
+
+        return defer.DeferredList([
+            self.setup_service(),
+            self.setup_server(),
+        ])
+
+    def tearDown(self):
+        return defer.DeferredList([
+            self.teardown_service(),
+            self.teardown_server(),
+        ])
+
+    def setup_service(self):
+        proto = TCPReverser()
+        return self._listen_protocol(proto, self.service_host, self.service_port, 'service')
+
+    def teardown_service(self):
+        return defer.maybeDeferred(self.service_transport.stopListening)
+
+    def setup_server(self):
+        proto = FakeSocks5ControlServerProtocol(('0.0.0.0', 1234), reactor=self.reactor)
+        return self._listen_protocol(proto, self.server_host, self.server_port, 'server')
+
+    def teardown_server(self):
+        return defer.maybeDeferred(self.server_transport.stopListening)
+
+    def _listen_protocol(self, protocol: Protocol, host: str, port: int, name: str):
+        def got_transport(transport):
+            setattr(self, name + '_transport', transport)
+            return transport
+
+        setattr(self, name + '_proto', protocol)
+        endpoint = TCP4ServerEndpoint(self.reactor, port, interface=host)
+        d = endpoint.listen(OneshotServerFactory(protocol))
+        d.addCallback(got_transport)
+        return d
+
+    def test_run(self):
+        def got_reply(reply: bytes):
+            try:
+                assert reply == b'olleh'
+            finally:
+                connector.disconnect()
+                # FIXME: workaround to strange error
+                # twisted.trial.util.DirtyReactorAggregateError: Reactor was unclean.
+                # Selectables:
+                # <TCPReverser #0 on 10000>
+                self.teardown_service().chainDeferred(d)
+
+        proto = TCPGreeter()
+        connector = TCPRelayConnector(
+            self.service_host, self.service_port, OneshotClientFactory(proto),
+            proxy_addr=(self.server_host, self.server_port), reactor=self.reactor,
+        )
+        connector.connect()
+
+        d = defer.Deferred()
+        proto.d.addCallback(got_reply).addErrback(d.errback)
+        return d
+
+
 class Reverser(DatagramProtocol):
     def datagramReceived(self, datagram, addr):
         data = bytes(reversed(datagram))
         self.transport.write(data, addr)
 
 
-# noinspection PyAttributeOutsideInit
+class TCPReverser(Protocol):
+    def dataReceived(self, data):
+        data = bytes(reversed(data))
+        self.transport.write(data)
+
+
+class OneshotServerFactory(ServerFactory):
+    def __init__(self, protocol: Protocol):
+        self.proto = protocol
+
+    def buildProtocol(self, addr):
+        return self.proto
+
+
 class Greeter(DatagramProtocol):
     def __init__(self, dest_addr):
         self.dest_addr = dest_addr
+        self.d = defer.Deferred()
 
     def startProtocol(self):
         self.transport.connect(*self.dest_addr)
         self.transport.write(b'hello')
-        self.d = defer.Deferred()
 
     def datagramReceived(self, datagram, addr):
         self.d.callback(datagram)
+
+
+class TCPGreeter(Protocol):
+    def __init__(self):
+        self.d = defer.Deferred()
+
+    def connectionMade(self):
+        self.transport.write(b'hello')
+
+    def dataReceived(self, data):
+        self.d.callback(data)
+
+
+class OneshotClientFactory(ClientFactory):
+    def __init__(self, protocol: Protocol):
+        self.proto = protocol
+
+    def buildProtocol(self, addr):
+        self.proto.factory = self
+        return self.proto
 
 
 def tearDownModule():

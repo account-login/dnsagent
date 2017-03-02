@@ -10,8 +10,8 @@ from typing import NamedTuple, Union, Optional, Tuple
 from twisted.internet.endpoints import (
     TCP4ClientEndpoint, TCP6ClientEndpoint, HostnameEndpoint, connectProtocol,
 )
-from twisted.internet.protocol import DatagramProtocol, Protocol, connectionDone
-from twisted.internet.interfaces import IListeningPort, IUDPTransport, IReactorUDP
+from twisted.internet.protocol import DatagramProtocol, Protocol, connectionDone, ClientFactory
+from twisted.internet.interfaces import IListeningPort, IUDPTransport, IReactorUDP, IConnector
 from twisted.internet.error import MessageLengthError, CannotListenError
 from twisted.python.failure import Failure
 from twisted.internet import address as taddress
@@ -26,6 +26,24 @@ logger = logging.getLogger(__name__)
 
 
 SocksHost = Union[IPv4Address, IPv6Address, str]
+
+
+def to_socks_host(host: str) -> SocksHost:
+    try:
+        return ip_address(host)
+    except ValueError:
+        return host
+
+
+def to_twisted_addr(host: str, port: int, type_='TCP'):
+    host = to_socks_host(host)
+    if isinstance(host, IPv4Address):
+        return taddress.IPv4Address(type_, str(host), port)
+    elif isinstance(host, IPv6Address):
+        return taddress.IPv6Address(type_, str(host), port)
+    else:
+        assert isinstance(host, str)
+        return taddress.HostnameAddress(host.encode(), port)
 
 
 class BadSocksHost(Exception):
@@ -214,25 +232,13 @@ class UDPRelayTransport:
         @return: An L{IAddress} provider.
         """
         host, port = self.connected_addr
-        try:
-            ipobj = ip_address(host)
-        except ValueError:
-            return taddress.HostnameAddress(host, port)
-        else:
-            if isinstance(ipobj, IPv4Address):
-                return taddress.IPv4Address('UDP', host, port)
-            else:
-                assert isinstance(ipobj, IPv6Address)
-                return taddress.IPv6Address('UDP', host, port)
+        return to_twisted_addr(host, port, type_='UDP')
 
     def connect(self, host, port):
         if self.connected_addr is not None:
             raise RuntimeError("already connected, reconnecting is not currently supported")
 
-        try:
-            host = str(ip_address(host))    # normalize ip address
-        except ValueError:
-            pass    # may be domain name
+        host = str(to_socks_host(host))     # normalize ip address
         self.connected_addr = (host, port)
         self.relay_proto.connect(self.connected_addr)
 
@@ -255,10 +261,7 @@ class UDPRelayTransport:
             assert addr is not None
 
         host, port = addr
-        try:
-            host = ip_address(host)
-        except ValueError:
-            pass
+        host = to_socks_host(host)
         self.relay_proto.send_datagram(datagram, host, port, max_size=self.max_size)
 
 
@@ -351,35 +354,144 @@ class UDPRelay:
         return self._stop_defer
 
 
+@implementer(IConnector)
+class TCPRelayConnector:
+    def __init__(
+            self, host: str, port: int, factory: ClientFactory,
+            proxy_addr: Tuple[str, int], reactor=None
+    ):
+        self.host, self.port = host, port
+        self.factory = factory
+        self.proxy_addr = proxy_addr
+        self.ctrl_proto = None      # type: Socks5ControlProtocol
+        self.ctrl_connect_d = None  # type: defer.Deferred
+        self.user_proto = None      # type: Protocol
+        self.state = 'disconnected'
+
+        if reactor is None:
+            from twisted.internet import reactor
+        self.reactor = reactor
+
+    def connect(self):
+        def authed(ignore):
+            host = to_socks_host(self.host)
+            d = self.ctrl_proto.request_tcp_connect(host, self.port)
+            d.addCallbacks(relay_ready, failed)
+            return ignore
+
+        def relay_ready(result):
+            self.state = 'connected'
+            self.user_proto.makeConnection(self.ctrl_proto.transport)
+            return result
+
+        def failed(failure):
+            self.state = 'disconnected'
+            if self.ctrl_proto.transport is not None:
+                self._disconnect_control_protocol() # triggers self.connection_lost()
+            self.factory.clientConnectionFailed(self, failure)
+            if self.state == 'disconnected':
+                self.factory.doStop()
+
+        if self.state != 'disconnected':
+            raise RuntimeError('TCPRelayConnector can not connect. state=%r', self.state)
+        self.state = 'connecting'
+
+        addr = to_twisted_addr(self.host, self.port, type_='TCP')
+        self.user_proto = self.factory.buildProtocol(addr)
+        if self.user_proto is not None:
+            self.factory.doStart()
+            self.factory.startedConnecting(self)
+
+            self.ctrl_proto = Socks5ControlProtocol()
+            self.ctrl_proto.connector = self
+            self.ctrl_proto.auth_defer.addCallbacks(authed, failed)
+            self._connect_control_protocol(failed)
+        else:
+            logger.debug('%r.buildProtocol(%r) returns None', self.factory, addr)
+
+    def _connect_control_protocol(self, errback):
+        """this method exists for test purpose."""
+        proxy_endpoint = get_client_endpoint(self.reactor, self.proxy_addr)
+        self.ctrl_connect_d = connectProtocol(proxy_endpoint, self.ctrl_proto)
+        self.ctrl_connect_d.addErrback(errback)
+
+    def connection_lost(self, failure):
+        if self.state == 'connected':   # preventing called from failed()
+            self.state = 'disconnected'
+            self.factory.clientConnectionLost(self, failure)
+            if self.state == 'disconnected':
+                self.factory.doStop()
+
+    def data_received(self, data):
+        assert self.state == 'connected'
+        self.user_proto.dataReceived(data)
+
+    def stopConnecting(self):
+        assert self.state == 'connecting'
+        self.state = 'disconnected'
+        if self.ctrl_connect_d:
+            self.ctrl_connect_d.cancel()
+        if self.ctrl_proto.transport:
+            self._disconnect_control_protocol()
+
+    def disconnect(self):
+        if self.state == 'connecting':
+            self.stopConnecting()
+        elif self.state == 'connected':
+            self._disconnect_control_protocol()
+        else:
+            raise RuntimeError('TCPRelayConnector already disconnected')
+
+    def getDestination(self):
+        raise NotImplementedError
+
+    def _disconnect_control_protocol(self):
+        self.ctrl_proto.transport.loseConnection()
+        self.ctrl_proto.transport = None
+        if self.user_proto and self.user_proto.transport:
+            self.user_proto.transport = None
+
+
 class BadSocks5Reply(Exception):
     pass
 
 
-def read_socks5_reply(bio: BytesIO) -> Tuple[int, SocksHost, int]:
-    def read(n: int) -> bytes:
-        data = bio.read(n)
-        if len(data) != n:
-            raise InsufficientData
-        return data
+_Socks5Reply = NamedTuple(
+    'Socks5Reply',
+    [('reply', int), ('bind_host', SocksHost), ('bind_port', int)])
 
-    ver = read(1)
-    if ver != b'\x05':
-        raise BadSocks5Reply('bad socks version: %r' % ver)
 
-    rep, = struct.unpack('!B', read(1))
+class Socks5Reply(_Socks5Reply):
+    # FIXME: verify reply and port.
+    def dumps(self):
+        return (
+            struct.pack('!BBB', 5, self.reply, 0)
+            + encode_socks_host(self.bind_host)
+            + struct.pack('!H', self.bind_port)
+        )
 
-    rsv = read(1)
-    if rsv != b'\x00':
-        raise BadSocks5Reply('RSV is not zero: %r' % rsv)
+    @classmethod
+    def load(cls, stream: BytesIO) -> 'Socks5Reply':
+        def read(n: int) -> bytes:
+            data = stream.read(n)
+            if len(data) != n:
+                raise InsufficientData
+            return data
 
-    try:
-        bind_addr = read_socks_host(bio)    # may raise InsufficientData
-    except BadSocksHost as exc:
-        raise BadSocks5Reply(exc) from exc
+        ver, rep, rsv = struct.unpack('!BBB', read(3))
+        if ver != 5:
+            raise BadSocks5Reply('bad socks version: %r' % ver)
+        if rsv != 0:
+            raise BadSocks5Reply('RSV is not zero: %r' % rsv)
 
-    bind_port, = struct.unpack('!H', read(2))
+        try:
+            bind_addr = read_socks_host(stream)  # may raise InsufficientData
+        except BadSocksHost as exc:
+            raise BadSocks5Reply(exc) from exc
 
-    return rep, bind_addr, bind_port
+        bind_port, = struct.unpack('!H', read(2))
+
+        return cls(rep, bind_addr, bind_port)
 
 
 class Socks5Cmd(IntEnum):
@@ -396,14 +508,13 @@ class Socks5ControlProtocol(Protocol):
         self.request_defer = None   # type: Optional[defer.Deferred]
         self.udp_relay = None       # type: Optional[UDPRelay]
         self._udp_relay_defer = None
-        self.user_protocol = None   # type: Optional[Protocol]
+        self.connector = None       # type: Optional[TCPRelayConnector]
 
     def get_udp_relay(self) -> defer.Deferred:
         if self._udp_relay_defer is None:
             self.udp_relay = UDPRelay(self)
             self._udp_relay_defer = self.udp_relay.setup_relay()
             self._udp_relay_defer.addCallback(lambda ignore: self.udp_relay)
-
         return self._udp_relay_defer
 
     def connectionMade(self):
@@ -412,12 +523,18 @@ class Socks5ControlProtocol(Protocol):
     def connectionLost(self, reason=connectionDone):
         if self.state == 'greeted':
             self.auth_defer.errback(reason)
+        elif self.state == 'authed':
+            # TODO: figure out when will happen for self._make_request()
+            pass
         elif self.state in ('udp_req', 'tcp_req'):
             self.request_defer.errback(reason)
-        # TODO: self.user_protocol
+        elif self.state == 'tcp_relay':
+            assert self.connector is not None
+            self.connector.connection_lost(reason)
 
         self.state = 'failed'
-        self.udp_relay.stop()
+        if self.udp_relay is not None:
+            self.udp_relay.stop()
 
     def greet(self):
         assert self.state == 'init'
@@ -476,7 +593,7 @@ class Socks5ControlProtocol(Protocol):
 
         bio = BytesIO(self.data)
         try:
-            reply, bind_host, bind_port = read_socks5_reply(bio)
+            reply, bind_host, bind_port = Socks5Reply.load(bio)
         except InsufficientData:
             pass
         except BadSocks5Reply as exc:
@@ -518,8 +635,9 @@ class Socks5ControlProtocol(Protocol):
                 self.check_udp_associate_reply()
             elif self.state == 'tcp_req':
                 self.check_tcp_connect_reply()
-            elif self.state == 'tcp_relay' and self.user_protocol is not None:
-                self.user_protocol.dataReceived(self.data)
+            elif self.state == 'tcp_relay':
+                assert self.connector is not None
+                self.connector.data_received(data)
                 self.data = b''
             else:
                 logger.error('unexpected server data: %r', data)
