@@ -2,12 +2,12 @@ import sys
 import logging
 from logging.handlers import MemoryHandler
 from argparse import ArgumentParser
-from twisted.internet import reactor, defer
+from twisted.internet import defer
 from twisted.names.dns import DNSDatagramProtocol
 from twisted.python.log import PythonLoggingObserver
 
 from dnsagent import logger
-from dnsagent.utils import watch_modification
+from dnsagent.utils import watch_modification, get_reactor
 
 
 def eval_config_file(filename):
@@ -19,9 +19,7 @@ def eval_config_file(filename):
 
 class App:
     def __init__(self, reactor=None):
-        if reactor is None:
-            from twisted.internet import reactor
-        self.reactor = reactor
+        self.reactor = get_reactor(reactor)
         self.ports = []
         self._is_running = False
 
@@ -117,6 +115,7 @@ def main(args=None):
 
     init_log(option.log)
 
+    reactor = get_reactor()
     app = App(reactor)
     loader = ConfigLoader(option.config, app, reload=option.reload)
     succ = loader.load()

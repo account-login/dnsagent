@@ -58,3 +58,9 @@ def rrheader_to_ip(rr):
         return IPv6Address(socket.inet_ntop(socket.AF_INET6, payload.address))
     else:
         return None
+
+
+def get_reactor(reactor=None):
+    if reactor is None:
+        from twisted.internet import reactor
+    return reactor

@@ -5,6 +5,7 @@ from twisted.names import dns
 
 from dnsagent import logger
 from dnsagent.resolver.base import MyResolverBase
+from dnsagent.utils import get_reactor
 
 
 __all__ = ('CachingResolver',)
@@ -20,9 +21,7 @@ class CachingResolver(MyResolverBase):
         super().__init__()
 
         self.resolver = resolver
-        if reactor is None:
-            from twisted.internet import reactor
-        self.reactor = reactor
+        self.reactor = get_reactor(reactor)
         self.cache = dict()
         self.cancel = dict()
 

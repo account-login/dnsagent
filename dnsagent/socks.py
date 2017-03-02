@@ -4,8 +4,9 @@ import struct
 import socket
 from io import BytesIO
 import logging
-
 from typing import NamedTuple, Union, Optional, Tuple
+
+from dnsagent.utils import get_reactor
 
 from twisted.internet.endpoints import (
     TCP4ClientEndpoint, TCP6ClientEndpoint, HostnameEndpoint, connectProtocol,
@@ -281,9 +282,7 @@ class UDPRelay:
 
         self._stop_defer = None
 
-        if reactor is None:
-            from twisted.internet import reactor
-        self.reactor = reactor
+        self.reactor = get_reactor(reactor)
 
     def setup_relay(self):
         def connect(result: Tuple[SocksHost, int]):
@@ -368,9 +367,7 @@ class TCPRelayConnector:
         self.user_proto = None      # type: Protocol
         self.state = 'disconnected'
 
-        if reactor is None:
-            from twisted.internet import reactor
-        self.reactor = reactor
+        self.reactor = get_reactor(reactor)
 
     def connect(self):
         def authed(ignore):
@@ -663,8 +660,7 @@ def get_udp_relay(proxy_addr, reactor=None):
         d = ctrl_proto.get_udp_relay()
         d.chainDeferred(rv)
 
-    if reactor is None:
-        from twisted.internet import reactor
+    reactor = get_reactor(reactor)
 
     rv = defer.Deferred()
     proxy_endpoint = get_client_endpoint(reactor, proxy_addr)

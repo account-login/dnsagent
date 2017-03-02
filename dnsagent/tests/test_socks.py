@@ -25,7 +25,7 @@ from dnsagent.socks import (
     Socks5ControlProtocol, Socks5Cmd, UDPRelay, get_udp_relay, get_client_endpoint,
     TCPRelayConnector,
 )
-from dnsagent.utils import rrheader_to_ip
+from dnsagent.utils import rrheader_to_ip, get_reactor
 
 
 logger = logging.getLogger(__name__)
@@ -449,9 +449,7 @@ class FakeSocks5ControlServerProtocol(Protocol):
         self.buffer = Buffer()
         self.state = None
 
-        if reactor is None:
-            from twisted.internet import reactor
-        self.reactor = reactor
+        self.reactor = get_reactor(reactor)
 
     def connectionMade(self):
         self.state = 'init'
@@ -558,8 +556,7 @@ class FakeUDPRelayServerProtocol(DatagramProtocol):
 # noinspection PyAttributeOutsideInit
 class BaseTestUDPRelayIntegrated(unittest.TestCase):
     def setUp(self):
-        from twisted.internet import reactor
-        self.reactor = reactor
+        self.reactor = get_reactor()
 
         self.setup_socks5_server()
         self.setup_target_service()
@@ -670,7 +667,7 @@ class SSRunner:
                 cls.wait_for_ss, times=(times - 1), timeout=timeout, d=d,
             )
 
-        from twisted.internet import reactor
+        reactor = get_reactor()
         d = d or defer.Deferred()
 
         if times <= 0:
@@ -950,8 +947,7 @@ class BaseTestTCPRelayConnectorIntegrated(unittest.TestCase):
     server_port = 20000
 
     def setUp(self):
-        from twisted.internet import reactor
-        self.reactor = reactor
+        self.reactor = get_reactor()
 
         return defer.DeferredList([
             self.setup_service(),

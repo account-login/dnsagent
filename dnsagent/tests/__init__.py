@@ -6,7 +6,7 @@ from twisted.python.failure import Failure
 from twisted.trial import unittest
 
 from dnsagent.app import init_log, enable_log
-from dnsagent.utils import rrheader_to_ip
+from dnsagent.utils import rrheader_to_ip, get_reactor
 from dnsagent.resolver.base import MyResolverBase
 
 
@@ -23,9 +23,7 @@ class FakeResolver(MyResolverBase):
         super().__init__()
         self.delay = 0
         self.map = dict()
-        if reactor is None:
-            from twisted.internet import reactor
-        self.reactor = reactor
+        self.reactor = get_reactor(reactor)
 
     def _lookup(self, name, cls, type_, timeout, **kwargs):
         def cleanup():
