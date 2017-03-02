@@ -629,30 +629,20 @@ class TestUDPRelayWithFakeServer(BaseTestUDPRelayIntegrated):
         return defer.DeferredList(dl)
 
 
-# noinspection PyAttributeOutsideInit
-class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
+class SSRunner:
     ss_server_host = '127.0.0.20'
     ss_server_port = 2222
     ss_client_host = '127.0.0.30'
     ss_client_port = 3333
     ss_passwd = '123'
-    service_host = '127.0.0.40'
-    service_port = 4444
 
     ss_server = None
     ss_local = None
-
-    def setUp(self):
-        d = defer.Deferred()
-        ss_d = self.setup_ss()
-        ss_d.addCallback(
-            lambda ignore: super(TestUDPRelayWithSS, self).setUp().chainDeferred(d)
-        ).addErrback(d.errback)
-        return d
+    _ss_defer = None
 
     @classmethod
-    def setup_ss(cls):
-        if cls.ss_server is None:
+    def start(cls) -> defer.Deferred:
+        if cls._ss_defer is None:
             cls.ss_server = subprocess.Popen([
                 'ssserver', '-s', cls.ss_server_host, '-p', str(cls.ss_server_port),
                 '-k', cls.ss_passwd, '--forbidden-ip', '',
@@ -662,10 +652,9 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
                 '-b', cls.ss_client_host, '-l', str(cls.ss_client_port), '-k', cls.ss_passwd,
             ])
 
-            cls.proxy_host, cls.proxy_port = cls.ss_client_host, cls.ss_client_port
-            return cls.wait_for_ss()
-        else:
-            return defer.succeed(None)
+            cls._ss_defer = cls.wait_for_ss()
+
+        return cls._ss_defer
 
     @classmethod
     def wait_for_ss(cls, times=20, timeout=0.2, d=None):
@@ -690,25 +679,17 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
             protocol = Protocol()
             connect_d = connectProtocol(
                 get_client_endpoint(
-                    reactor, (cls.proxy_host, cls.proxy_port), timeout=timeout),
+                    reactor, (cls.ss_client_host, cls.ss_client_port), timeout=timeout),
                 protocol,
             )
             connect_d.addCallbacks(connected, failed)
 
         return d
 
-    def setup_socks5_server(self):
-        pass
-
-    def setup_target_service(self):
-        self.reverser_transport = self.reactor.listenUDP(
-            self.service_port, Reverser(), interface=self.service_host,
-        )
-
     @classmethod
-    def shutdown_ss(cls):
+    def shutdown(cls):
         def kill_proc_tree(pid):
-            parent = psutil.Process(pid)
+            parent = psutil.Process(pid)    # FIXME: psutil not available on cygwin
             children = parent.children(recursive=True)
             for child in children:
                 child.kill()
@@ -723,6 +704,30 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
         for popen in (cls.ss_server, cls.ss_local):
             if popen.returncode is None:
                 kill_proc_tree(popen.pid)
+
+
+# noinspection PyAttributeOutsideInit
+class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
+    service_host = '127.0.0.40'
+    service_port = 4444
+
+    proxy_host, proxy_port = SSRunner.ss_client_host, SSRunner.ss_client_port
+
+    def setUp(self):
+        d = defer.Deferred()
+        ss_d = SSRunner.start()
+        ss_d.addCallback(
+            lambda ignore: super(TestUDPRelayWithSS, self).setUp().chainDeferred(d)
+        ).addErrback(d.errback)
+        return d
+
+    def setup_socks5_server(self):
+        pass
+
+    def setup_target_service(self):
+        self.reverser_transport = self.reactor.listenUDP(
+            self.service_port, Reverser(), interface=self.service_host,
+        )
 
     def tearDown(self):
         return defer.DeferredList([
@@ -937,14 +942,12 @@ class TestTCPRelayConnector(unittest.TestCase):
         assert self.connector.ctrl_proto.transport is self.connector.user_proto.transport is None
 
 
-class TestTCPRelayConnectorWithFakeServer(unittest.TestCase):
+class BaseTestTCPRelayConnectorIntegrated(unittest.TestCase):
     service_host = '127.0.0.100'
     service_port = 10000
-    service_transport = None
 
     server_host = '127.0.0.200'
     server_port = 20000
-    server_transport = None
 
     def setUp(self):
         from twisted.internet import reactor
@@ -957,23 +960,9 @@ class TestTCPRelayConnectorWithFakeServer(unittest.TestCase):
 
     def tearDown(self):
         return defer.DeferredList([
-            self.teardown_service(),
-            self.teardown_server(),
+            defer.maybeDeferred(self.teardown_service),
+            defer.maybeDeferred(self.teardown_server),
         ])
-
-    def setup_service(self):
-        proto = TCPReverser()
-        return self._listen_protocol(proto, self.service_host, self.service_port, 'service')
-
-    def teardown_service(self):
-        return defer.maybeDeferred(self.service_transport.stopListening)
-
-    def setup_server(self):
-        proto = FakeSocks5ControlServerProtocol(('0.0.0.0', 1234), reactor=self.reactor)
-        return self._listen_protocol(proto, self.server_host, self.server_port, 'server')
-
-    def teardown_server(self):
-        return defer.maybeDeferred(self.server_transport.stopListening)
 
     def _listen_protocol(self, protocol: Protocol, host: str, port: int, name: str):
         def got_transport(transport):
@@ -986,17 +975,28 @@ class TestTCPRelayConnectorWithFakeServer(unittest.TestCase):
         d.addCallback(got_transport)
         return d
 
+    def setup_service(self):
+        proto = TCPReverser()
+        return self._listen_protocol(proto, self.service_host, self.service_port, 'service')
+
+    def teardown_service(self):
+        return defer.DeferredList([
+            defer.maybeDeferred(self.service_transport.stopListening),
+            defer.maybeDeferred(self.service_proto.transport.loseConnection)
+        ])
+
+    def setup_server(self):
+        raise NotImplementedError
+
+    def teardown_server(self):
+        raise NotImplementedError
+
     def test_run(self):
         def got_reply(reply: bytes):
             try:
                 assert reply == b'olleh'
             finally:
                 connector.disconnect()
-                # FIXME: workaround to strange error
-                # twisted.trial.util.DirtyReactorAggregateError: Reactor was unclean.
-                # Selectables:
-                # <TCPReverser #0 on 10000>
-                self.teardown_service().chainDeferred(d)
 
         proto = TCPGreeter()
         connector = TCPRelayConnector(
@@ -1005,9 +1005,26 @@ class TestTCPRelayConnectorWithFakeServer(unittest.TestCase):
         )
         connector.connect()
 
-        d = defer.Deferred()
-        proto.d.addCallback(got_reply).addErrback(d.errback)
-        return d
+        proto.d.addCallback(got_reply)
+        return proto.d
+
+
+class TestTCPRelayConnectorWithFakeServer(BaseTestTCPRelayConnectorIntegrated):
+    def setup_server(self):
+        proto = FakeSocks5ControlServerProtocol(('0.0.0.0', 1234), reactor=self.reactor)
+        return self._listen_protocol(proto, self.server_host, self.server_port, 'server')
+
+    def teardown_server(self):
+        return self.server_transport.stopListening()
+
+
+class TestTCPRelayConnectorWithSS(BaseTestTCPRelayConnectorIntegrated):
+    def setup_server(self):
+        self.server_host, self.server_port = SSRunner.ss_client_host, SSRunner.ss_client_port
+        return SSRunner.start()
+
+    def teardown_server(self):
+        pass
 
 
 class Reverser(DatagramProtocol):
@@ -1064,8 +1081,9 @@ class OneshotClientFactory(ClientFactory):
 
 
 def tearDownModule():
-    if TestUDPRelayWithSS.ss_local is not None:
-        TestUDPRelayWithSS.shutdown_ss()
+    if SSRunner.ss_local:
+        SSRunner.shutdown()
 
 
 del BaseTestUDPRelayIntegrated
+del BaseTestTCPRelayConnectorIntegrated
