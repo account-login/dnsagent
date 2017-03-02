@@ -270,6 +270,8 @@ class UDPRelayTransport:
 class UDPRelay:
     def __init__(self, ctrl_protocol: 'Socks5ControlProtocol', reactor=None):
         self.ctrl_proto = ctrl_protocol
+        assert self.ctrl_proto.udp_relay is None
+        self.ctrl_proto.udp_relay = self
         self.relay_proto = UDPRelayProtocol()
         self.listening_port = None
 
@@ -281,7 +283,6 @@ class UDPRelay:
         self.relay_port = None
 
         self._stop_defer = None
-
         self.reactor = get_reactor(reactor)
 
     def setup_relay(self):
@@ -504,15 +505,7 @@ class Socks5ControlProtocol(Protocol):
         self.auth_defer = defer.Deferred()
         self.request_defer = None   # type: Optional[defer.Deferred]
         self.udp_relay = None       # type: Optional[UDPRelay]
-        self._udp_relay_defer = None
         self.connector = None       # type: Optional[TCPRelayConnector]
-
-    def get_udp_relay(self) -> defer.Deferred:
-        if self._udp_relay_defer is None:
-            self.udp_relay = UDPRelay(self)
-            self._udp_relay_defer = self.udp_relay.setup_relay()
-            self._udp_relay_defer.addCallback(lambda ignore: self.udp_relay)
-        return self._udp_relay_defer
 
     def connectionMade(self):
         self.greet()
@@ -657,7 +650,8 @@ def get_client_endpoint(reactor, addr: Tuple[str, int], **kwargs):
 
 def get_udp_relay(proxy_addr, reactor=None):
     def proxy_connected(ignore):
-        d = ctrl_proto.get_udp_relay()
+        relay = UDPRelay(ctrl_proto)
+        d = relay.setup_relay().addCallback(lambda ignore: relay)
         d.chainDeferred(rv)
 
     reactor = get_reactor(reactor)
