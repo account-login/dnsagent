@@ -23,10 +23,6 @@ class App:
         self.ports = []
         self._is_running = False
 
-    @property
-    def running(self):
-        return self._is_running
-
     def start(self, server_info):
         assert not self._is_running
         logger.info('starting server: %s', server_info)
@@ -57,14 +53,20 @@ class App:
         logger.info('restarting: %s', server_info)
         self.reactor.callFromThread(self._restart, server_info)
 
+    def _restart(self, server_info):
+        self.stop().addBoth(lambda ignore: self._start(server_info))
+
+    def run(self, server_info):
+        if self._is_running:
+            self.restart(server_info)
+        else:
+            self.start(server_info)
+
     def stop(self):
         return defer.DeferredList(
             [ defer.maybeDeferred(port.stopListening) for port in self.ports ],
             consumeErrors=True,
         )
-
-    def _restart(self, server_info):
-        self.stop().addBoth(lambda ignore: self._start(server_info))
 
 
 class ConfigLoader:
@@ -92,10 +94,7 @@ class ConfigLoader:
         if log_enabled:
             enable_log()
 
-        if self.app.running:
-            self.app.restart(server_info)
-        else:
-            self.app.start(server_info)
+        self.app.run(server_info)
 
         if not log_enabled:
             logger.info('disable logging.')
