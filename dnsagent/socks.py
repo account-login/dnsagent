@@ -652,7 +652,7 @@ def get_client_endpoint(reactor, addr: Tuple[str, int], **kwargs):
 
 @implementer(IReactorTCP)
 class SocksProxy:
-    def __init__(self, host: SocksHost, port: int, reactor=None):
+    def __init__(self, host: str, port: int, reactor=None):
         self.host, self.port = host, port
         self.reactor = get_reactor(reactor)
 
@@ -663,7 +663,7 @@ class SocksProxy:
             d.chainDeferred(rv)
 
         rv = defer.Deferred()
-        proxy_endpoint = get_client_endpoint(self.reactor, (str(self.host), self.port))
+        proxy_endpoint = get_client_endpoint(self.reactor, (self.host, self.port))
         ctrl_proto = Socks5ControlProtocol()
         ctrl_connected = connectProtocol(proxy_endpoint, ctrl_proto)
         ctrl_connected.addCallbacks(proxy_connected, rv.errback)
@@ -679,7 +679,7 @@ class SocksProxy:
 
         connector = TCPRelayConnector(
             host, port, factory,
-            proxy_addr=(str(self.host), self.port), reactor=self.reactor,
+            proxy_addr=(self.host, self.port), reactor=self.reactor,
         )
         connector.connect()
         return connector

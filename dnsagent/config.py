@@ -4,7 +4,7 @@ from collections import namedtuple
 from twisted.names.common import ResolverBase
 
 from dnsagent.resolver import (
-    Resolver, TCPResovlver, ParallelResolver, ChainedResolver,
+    ExtendedResolver, TCPExtendedResolver, ParallelResolver, ChainedResolver,
     DualResovlver, HostsResolver, CachingResolver,
 )
 from dnsagent.server import MyDNSServerFactory
@@ -85,9 +85,9 @@ def make_resolver(arg):
     if isinstance(arg, str):
         server_info = parse_dns_server_string(arg)
         if server_info.proto == 'tcp':
-            return TCPResovlver(servers=[(server_info.host, server_info.port)])
+            return TCPExtendedResolver(servers=[(server_info.host, server_info.port)])
         else:
-            return Resolver(servers=[(server_info.host, server_info.port)])
+            return ExtendedResolver(servers=[(server_info.host, server_info.port)])
     else:
         assert isinstance(arg, ResolverBase)
         return arg

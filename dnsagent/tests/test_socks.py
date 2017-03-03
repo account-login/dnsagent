@@ -17,7 +17,7 @@ from twisted.internet.protocol import (
 from twisted.internet.endpoints import TCP4ClientEndpoint, TCP4ServerEndpoint, connectProtocol
 
 from dnsagent.app import App
-from dnsagent.resolver.basic import ResolverOverSocks
+from dnsagent.resolver.basic import ExtendedResolver, TCPExtendedResolver
 from dnsagent.socks import (
     read_socks_host, encode_socks_host, SocksHost, BadSocksHost, InsufficientData,
     Socks5Reply, BadSocks5Reply, to_twisted_addr,
@@ -738,14 +738,11 @@ class TestGetUDPRelayWithSS(TestUDPRelayWithSS):
 
 
 class TestResolverOverSocks(TestUDPRelayWithSS):
-    def setUp(self):
-        def set_resolver(ignore):
-            self.resolver = ResolverOverSocks(
-                servers=[(self.service_host, self.service_port)],
-                socks_proxy_addr=(self.proxy_host, self.proxy_port),
-            )
-            return ignore
-        return super().setUp().addCallback(set_resolver)
+    def setup_resolver(self, resolver_cls: type):
+        self.resolver = resolver_cls(
+            servers=[(self.service_host, self.service_port)],
+            socks_proxy=SocksProxy(self.proxy_host, self.proxy_port),
+        )
 
     def setup_target_service(self):
         from dnsagent.config import server, hosts
@@ -762,13 +759,23 @@ class TestResolverOverSocks(TestUDPRelayWithSS):
     def tearDown(self):
         return self.app.stop()
 
-    def test_run(self):
+    def run_test(self, resolver_cls: type):
         def check_a(result):
             ans, add, ns = result
             assert [ rrheader_to_ip(rr) for rr in ans ] == [ ip_address('1.2.3.4') ]
             assert add == ns == []
 
+        self.setup_resolver(resolver_cls)
         return self.resolver.lookupAddress('asdf', timeout=[1]).addBoth(check_a)
+
+    def test_resolve_over_udp(self):
+        return self.run_test(ExtendedResolver)
+
+    def test_resolve_over_tcp(self):
+        return self.run_test(TCPExtendedResolver)
+
+    def test_run(self):
+        self.skipTest('this test is splited.')
 
 
 class TestableTCPRelayConnector(TCPRelayConnector):
