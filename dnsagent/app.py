@@ -34,7 +34,7 @@ class App:
         factory, binds = server_info
         self.ports.clear()
         for interface, port in binds:
-            protocol = DNSDatagramProtocol(controller=factory)
+            protocol = DNSDatagramProtocol(controller=factory, reactor=self.reactor)
             self.ports.append(self._start_udp(port, protocol, interface))
             self.ports.append(self._start_tcp(port, factory, interface))
 

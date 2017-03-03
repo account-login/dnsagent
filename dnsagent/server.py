@@ -45,9 +45,10 @@ class MyDNSServerFactory(DNSServerFactory):
         @return: A C{deferred} which fires with the resolved result or error of
             the first query in C{message}.
         @rtype: L{Deferred<twisted.internet.defer.Deferred>}
-        # """
+        """
         request_id = message.id
         logger.info('[%d]handleQuery(%r), from %s', request_id, message.queries[0], address)
+
         query = message.queries[0]
         d = self.resolver.query(query, timeout=self.resolve_timeout, request_id=request_id)
         return d.addCallback(
@@ -79,6 +80,7 @@ class MyDNSServerFactory(DNSServerFactory):
             protocol.writeMessage(message)          # L{dns.DNSProtocol}
         else:
             protocol.writeMessage(message, address) # L{dns.DNSDatagramProtocol}
+
         logger.info(
             '[%d]reply: %r, cost: %.1f ms', message.id,
             (message.answers, message.authority, message.additional),

@@ -199,13 +199,13 @@ class UDPRelayProtocol(DatagramProtocol):
 @implementer(IListeningPort, IUDPTransport)
 class UDPRelayTransport:
     def __init__(
-            self, port: int, proto, *,
+            self, port: int, protocol: DatagramProtocol, *,
             relay_protocol: UDPRelayProtocol, max_packet_size: int = 8192
     ):
         self.port = port
-        self.protocol = proto
+        self.protocol = protocol
         self.relay_proto = relay_protocol
-        self.relay_proto.set_user_protocol(proto)
+        self.relay_proto.set_user_protocol(protocol)
         self.max_size = max_packet_size
         self.connected_addr = None
 
@@ -314,7 +314,7 @@ class UDPRelay:
         self.ctrl_proto.auth_defer.addCallbacks(authed, self.relay_defer.errback)
         return self.relay_defer
 
-    def listenUDP(self, port, protocol, interface='', maxPacketSize=8192):
+    def listenUDP(self, port: int, protocol: DatagramProtocol, interface='', maxPacketSize=8192):
         """
         Connects a given L{DatagramProtocol} to the given numeric UDP port.
 
