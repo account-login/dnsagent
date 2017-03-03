@@ -648,18 +648,21 @@ def get_client_endpoint(reactor, addr: Tuple[str, int], **kwargs):
         return HostnameEndpoint(reactor, host.encode(), port, **kwargs)
 
 
-def get_udp_relay(proxy_addr, reactor=None):
-    def proxy_connected(ignore):
-        relay = UDPRelay(ctrl_proto)
-        d = relay.setup_relay().addCallback(lambda ignore: relay)
-        d.chainDeferred(rv)
+class SocksProxy:
+    def __init__(self, host: SocksHost, port: int, reactor=None):
+        self.host, self.port = host, port
+        self.reactor = get_reactor(reactor)
 
-    reactor = get_reactor(reactor)
+    def get_udp_relay(self):
+        def proxy_connected(ignore):
+            relay = UDPRelay(ctrl_proto)
+            d = relay.setup_relay().addCallback(lambda ignore: relay)
+            d.chainDeferred(rv)
 
-    rv = defer.Deferred()
-    proxy_endpoint = get_client_endpoint(reactor, proxy_addr)
-    ctrl_proto = Socks5ControlProtocol()
-    ctrl_connected = connectProtocol(proxy_endpoint, ctrl_proto)
-    ctrl_connected.addCallbacks(proxy_connected, rv.errback)
+        rv = defer.Deferred()
+        proxy_endpoint = get_client_endpoint(self.reactor, (str(self.host), self.port))
+        ctrl_proto = Socks5ControlProtocol()
+        ctrl_connected = connectProtocol(proxy_endpoint, ctrl_proto)
+        ctrl_connected.addCallbacks(proxy_connected, rv.errback)
 
-    return rv
+        return rv

@@ -4,7 +4,7 @@ from twisted.names.dns import DNSDatagramProtocol
 from typing import Tuple
 
 from dnsagent.resolver.base import patch_resolver
-from dnsagent.socks import get_udp_relay, UDPRelay
+from dnsagent.socks import SocksProxy, UDPRelay
 
 
 __all__ = ('Resolver', 'TCPResovlver')
@@ -59,7 +59,8 @@ class ResolverOverSocks(Resolver):
     def _query(self, *args):
         if self.socks_proxy_addr is not None:
             d = defer.Deferred()
-            relay_d = get_udp_relay(self.socks_proxy_addr, reactor=self._reactor)
+            proxy = SocksProxy(*self.socks_proxy_addr, reactor=self._reactor)
+            relay_d = proxy.get_udp_relay()
             relay_d.addCallback(self._got_relay, d, *args)
             relay_d.addErrback(d.errback)
             return d

@@ -22,7 +22,7 @@ from dnsagent.socks import (
     read_socks_host, encode_socks_host, SocksHost, BadSocksHost, InsufficientData,
     Socks5Reply, BadSocks5Reply, to_twisted_addr,
     UDPRelayPacket, BadUDPRelayPacket, UDPRelayProtocol, UDPRelayTransport,
-    Socks5ControlProtocol, Socks5Cmd, UDPRelay, get_udp_relay, get_client_endpoint,
+    Socks5ControlProtocol, Socks5Cmd, UDPRelay, SocksProxy, get_client_endpoint,
     TCPRelayConnector,
 )
 from dnsagent.utils import rrheader_to_ip, get_reactor
@@ -732,9 +732,8 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
 # noinspection PyAttributeOutsideInit
 class TestGetUDPRelayWithSS(TestUDPRelayWithSS):
     def setup_socks5_client(self):
-        self.relay_done = get_udp_relay(
-            (self.proxy_host, self.proxy_port), reactor=self.reactor,
-        )
+        proxy = SocksProxy(self.proxy_host, self.proxy_port, reactor=self.reactor)
+        self.relay_done = proxy.get_udp_relay()
         self.relay_done.addCallback(lambda relay: setattr(self, 'relay', relay))
 
 
