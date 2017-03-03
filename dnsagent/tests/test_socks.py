@@ -140,11 +140,16 @@ class FakeDatagramProtocol(DatagramProtocol):
 
 
 class FakeProtocol(Protocol):
+    lost = False
+
     def __init__(self):
         self.recv_logs = []
 
     def dataReceived(self, data):
         self.recv_logs.append(data)
+
+    def connectionLost(self, reason=connectionDone):
+        self.lost = True
 
 
 def test_udp_relay_protocol():
@@ -857,6 +862,7 @@ class TestTCPRelayConnector(unittest.TestCase):
 
         # close connection
         ctrl_proto.connectionLost(Failure(Exception('haha')))
+        assert self.connector.user_proto.lost
         assert self.factory.lost            # clientConnectionLost() called
         assert not self.factory.started     # stopFactory() called
 

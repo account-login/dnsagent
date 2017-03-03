@@ -418,6 +418,7 @@ class TCPRelayConnector:
     def connection_lost(self, failure):
         if self.state == 'connected':   # preventing called from failed()
             self.state = 'disconnected'
+            self.user_proto.connectionLost(failure)
             self.factory.clientConnectionLost(self, failure)
             if self.state == 'disconnected':
                 self.factory.doStop()
