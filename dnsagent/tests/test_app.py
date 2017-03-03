@@ -3,63 +3,59 @@ import random
 import pytest
 from twisted.internet import defer
 from twisted.internet.error import CannotListenError
+from twisted.trial import unittest
 
 from dnsagent.app import App
-from dnsagent.config import parse_dns_server_string, DnsServerInfo, InvalidDnsServerString
+from dnsagent.utils import parse_url, ParsedURL, BadURL
+from dnsagent.config import parse_dns_server_string, DnsServerInfo
 from dnsagent.resolver import ExtendedResolver
-from dnsagent.resolver.hosts import parse_hosts_file
 from dnsagent.server import MyDNSServerFactory
 from dnsagent.tests import iplist, FakeResolver, TestResolverBase
 
 
-def test_parse_dns_server_string():
-    def R(string, *, proto='udp', host=None, port=53):
-        assert parse_dns_server_string(string) == DnsServerInfo(proto, host, port)
+class BaseTestParseURL(unittest.TestCase):
+    parse_method = None
+    parsed_type = None
 
-    def E(string):
-        with pytest.raises(InvalidDnsServerString):
-            parse_dns_server_string(string)
+    def good(self, string: str, scheme=None, host=None, port=None):
+        assert self.parse_method(string) == self.parsed_type(scheme, host, port)
 
-    R('127.0.0.1', host='127.0.0.1')
-    R('2000::', host='2000::')
-    R('[2000::]', host='2000::')
+    def bad(self, string: str):
+        with pytest.raises(BadURL):
+            self.parse_method(string)
 
-    R('127.0.0.1:88', host='127.0.0.1', port=88)
-    E('2000:::88')
-    R('[2000::]:88', host='2000::', port=88)
+    def test_run(self):
+        self.good('127.0.0.1', host='127.0.0.1')
+        self.good('2000::', host='2000::')
+        self.good('[2000::]', host='2000::')
 
-    R('tcp://127.0.0.1', proto='tcp', host='127.0.0.1')
-    R('udp://127.0.0.1', proto='udp', host='127.0.0.1')
-    E('tcp://2000::')
-    R('tcp://[2000::]', proto='tcp', host='2000::')
+        self.good('127.0.0.1:88', host='127.0.0.1', port=88)
+        self.bad('2000:::88')
+        self.good('[2000::]:88', host='2000::', port=88)
 
-    E('[200::')
-    E('[20u::]')
-    E('127.0.0.1:ff')
-    E('[2000::]ff')
+        self.good('tcp://127.0.0.1', scheme='tcp', host='127.0.0.1')
+        self.good('udp://127.0.0.1', scheme='udp', host='127.0.0.1')
+        self.bad('tcp://2000::')
+        self.good('tcp://[2000::]', scheme='tcp', host='2000::')
+
+        self.bad('[200::')
+        self.bad('[20u::]')
+        self.bad('127.0.0.1:ff')
+        self.bad('[2000::]ff')
+        self.bad(':123')
 
 
-def test_parse_hosts_file():
-    name2ip = parse_hosts_file('''
-        127.0.0.1   localhost loopback
-        ::1         localhost   # asdf
-        127.0.0.1   localhost loopback
+class TestParseURL(BaseTestParseURL):
+    parse_method = staticmethod(parse_url)
+    parsed_type = ParsedURL
 
-        # asdf
-        0.0.0.0     a b
-        0.0.0.1     c a
 
-        # bad lines
-        0.0.0.256 asdf
-        0.0.0.0
-    '''.splitlines())
-    assert name2ip == dict(
-        localhost=iplist('127.0.0.1', '::1'),
-        loopback=iplist('127.0.0.1'),
-        a=iplist('0.0.0.0', '0.0.0.1'),
-        b=iplist('0.0.0.0'),
-        c=iplist('0.0.0.1'),
-    )
+class TestParseDnsServerString(BaseTestParseURL):
+    parse_method = staticmethod(parse_dns_server_string)
+    parsed_type = DnsServerInfo
+
+    def good(self, string: str, scheme='udp', host=None, port=53):
+        return super().good(string, scheme, host, port)
 
 
 class TestApp(TestResolverBase):
@@ -101,4 +97,5 @@ class TestApp(TestResolverBase):
         self.check_a('asdfasdf', fail=True)
 
 
+del BaseTestParseURL
 del TestResolverBase

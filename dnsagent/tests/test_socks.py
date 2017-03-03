@@ -772,10 +772,11 @@ class TestResolverOverSocks(TestUDPRelayWithSS):
         return self.run_test(ExtendedResolver)
 
     def test_resolve_over_tcp(self):
+        # FIXME: this fails randomly on windows
         return self.run_test(TCPExtendedResolver)
 
     def test_run(self):
-        self.skipTest('this test is splited.')
+        """this test is splited."""
 
 
 class TestableTCPRelayConnector(TCPRelayConnector):

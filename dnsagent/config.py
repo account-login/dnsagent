@@ -1,93 +1,48 @@
 import os
-from ipaddress import IPv4Address, IPv6Address, AddressValueError
-from collections import namedtuple
-from twisted.names.common import ResolverBase
+from typing import NamedTuple
 
 from dnsagent.resolver import (
     ExtendedResolver, TCPExtendedResolver, ParallelResolver, ChainedResolver,
     DualResovlver, HostsResolver, CachingResolver,
 )
 from dnsagent.server import MyDNSServerFactory
+from dnsagent.socks import SocksProxy
+from dnsagent.utils import parse_url
+
+from twisted.names.common import ResolverBase
 
 
 __all__ = ('make_resolver', 'chain', 'parallel', 'dual', 'hosts', 'cache', 'server')
 
 
-class InvalidDnsServerString(Exception):
-    pass
+def parse_proxy_string(string: str) -> SocksProxy:
+    scheme, host, port = parse_url(string)
+    scheme = scheme or 'socks5'
+    assert scheme in ('socks5', 'socks')
+    port = port or 1080
+    return SocksProxy(host, port)
 
 
-class DnsServerInfo(namedtuple('DnsServerInfo', 'proto host port'.split())):
-    pass
+DnsServerInfo = NamedTuple('DnsServerInfo', [('proto', str), ('host', str), ('port', int)])
 
 
 def parse_dns_server_string(string: str) -> DnsServerInfo:
     # TODO: support domain name
-    try:
-        IPv6Address(string)
-    except AddressValueError:
-        pass
-    else:
-        return DnsServerInfo('udp', string, 53)
-
-    if string.startswith('tcp://'):
-        proto = 'tcp'
-        string = string[len('tcp://'):]
-    elif string.startswith('udp://'):
-        string = string[len('udp://'):]
-        proto = 'udp'
-    else:
-        proto = 'udp'
-
-    if string.startswith('['):
-        # ipv6
-        try:
-            idx = string.index(']')
-        except ValueError:
-            raise InvalidDnsServerString
-
-        host = string[1:idx]
-        try:
-            IPv6Address(host)
-        except AddressValueError:
-            raise InvalidDnsServerString
-
-        colon = idx + 1
-        string = string[colon:]
-    else:
-        try:
-            colon = string.index(':')
-        except ValueError:
-            colon = len(string)
-
-        host = string[:colon]
-        try:
-            IPv4Address(host)
-        except AddressValueError:
-            raise InvalidDnsServerString
-
-        string = string[colon:]
-
-    if string:
-        if string[0] != ':':
-            raise InvalidDnsServerString
-        try:
-            port = int(string[1:])
-        except ValueError:
-            raise InvalidDnsServerString
-    else:
-        port = 53
-
-    return DnsServerInfo(proto, host, port)
+    scheme, host, port = parse_url(string)
+    scheme = scheme or 'udp'
+    assert scheme in ('tcp', 'udp')
+    port = port or 53
+    return DnsServerInfo(scheme, host, port)
 
 
-def make_resolver(arg):
+def make_resolver(arg, proxy=None):
     if isinstance(arg, str):
+        if isinstance(proxy, str):
+            proxy = parse_proxy_string(proxy)
+
         server_info = parse_dns_server_string(arg)
-        if server_info.proto == 'tcp':
-            return TCPExtendedResolver(servers=[(server_info.host, server_info.port)])
-        else:
-            return ExtendedResolver(servers=[(server_info.host, server_info.port)])
+        resolver_cls = dict(tcp=TCPExtendedResolver, udp=ExtendedResolver)[server_info.proto]
+        return resolver_cls(servers=[(server_info.host, server_info.port)], socks_proxy=proxy)
     else:
         assert isinstance(arg, ResolverBase)
         return arg

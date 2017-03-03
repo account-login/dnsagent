@@ -7,8 +7,32 @@ from twisted.names import dns
 
 from dnsagent.config import hosts
 from dnsagent.resolver import HostsResolver, CachingResolver, ParallelResolver
+from dnsagent.resolver.hosts import parse_hosts_file
 from dnsagent.utils import rrheader_to_ip
 from dnsagent.tests import iplist, FakeResolver, TestResolverBase
+
+
+def test_parse_hosts_file():
+    name2ip = parse_hosts_file('''
+        127.0.0.1   localhost loopback
+        ::1         localhost   # asdf
+        127.0.0.1   localhost loopback  # duplicated
+
+        # asdf
+        0.0.0.0     a b
+        0.0.0.1     c a
+
+        # bad lines
+        0.0.0.256 asdf
+        0.0.0.0
+    '''.splitlines())
+    assert name2ip == dict(
+        localhost=iplist('127.0.0.1', '::1'),
+        loopback=iplist('127.0.0.1'),
+        a=iplist('0.0.0.0', '0.0.0.1'),
+        b=iplist('0.0.0.0'),
+        c=iplist('0.0.0.1'),
+    )
 
 
 class TestHostsResolver(TestResolverBase):

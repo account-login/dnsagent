@@ -1,6 +1,8 @@
 import os
 import socket
 from ipaddress import IPv4Address, IPv6Address
+from typing import NamedTuple, Tuple
+import re
 
 from twisted.names import dns
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
@@ -64,3 +66,56 @@ def get_reactor(reactor=None):
     if reactor is None:
         from twisted.internet import reactor
     return reactor
+
+
+class BadURL(Exception):
+    pass
+
+
+ParsedURL = NamedTuple('ParsedURL', [('scheme', str), ('host', str), ('port', int)])
+
+
+def parse_url(string: str) -> ParsedURL:
+    scheme, host, port = None, None, None
+
+    matched = re.match('^(.+)://(.+)', string)
+    if matched:
+        scheme, string = matched.group(1), matched.group(2)
+
+    host, string = _parse_host(string, scheme=scheme)
+
+    if string:
+        if string[0] != ':':
+            raise BadURL(':port expected, got %r' % string)
+        string = string[1:]
+
+        try:
+            port = int(string)
+        except ValueError:
+            raise BadURL('bad port number: %s' % string)
+
+    return ParsedURL(scheme, host, port)
+
+
+def _parse_host(string: str, scheme=None) -> Tuple[str, str]:
+    matched = re.match(r'\[(.+)\](.*)', string)
+    if matched:
+        host, string = matched.group(1), matched.group(2)
+        try:
+            IPv6Address(host)
+        except ValueError:
+            raise BadURL('bad host: %s' % host )
+        return host, string
+
+    if not scheme:
+        try:
+            IPv6Address(string)
+        except ValueError:
+            pass
+        else:
+            return string, ''
+
+    matched = re.match('([^:]+)(.*)', string)
+    if not matched:
+        raise BadURL
+    return matched.group(1), matched.group(2)
