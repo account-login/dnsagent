@@ -156,7 +156,6 @@ class UDPRelayProtocol(DatagramProtocol):
         Will only be called once, after all ports are disconnected.
         """
         if self.user_protocol is not None:
-            self.user_protocol.doStop()
             self.user_protocol = None
 
     def datagramReceived(self, datagram: bytes, addr):
@@ -205,7 +204,7 @@ class UDPRelayTransport:
         self.port = port
         self.protocol = protocol
         self.relay_proto = relay_protocol
-        self.relay_proto.set_user_protocol(protocol)
+        self.relay_proto.set_user_protocol(self.protocol)
         self.max_size = max_packet_size
         self.connected_addr = None
 
@@ -217,7 +216,7 @@ class UDPRelayTransport:
                                   a TCP port and it cannot bind to the required
                                   port number).
         """
-        self.protocol.makeConnection(self)
+        self.protocol.makeConnection(self)  # startProtocol() called
 
     def stopListening(self):
         """
@@ -227,6 +226,7 @@ class UDPRelayTransport:
         upon completion.
         """
         self.connected_addr = None
+        self.protocol.doStop()  # stopProtocol() called
 
     def getHost(self):
         """

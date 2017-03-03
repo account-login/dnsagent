@@ -132,11 +132,20 @@ class FakeTransport:
 
 
 class FakeDatagramProtocol(DatagramProtocol):
+    start_count = 0
+    stop_count = 0
+
     def __init__(self):
         self.data_logs = []
 
     def datagramReceived(self, datagram: bytes, addr):
         self.data_logs.append((datagram, addr))
+
+    def startProtocol(self):
+        self.start_count += 1
+
+    def stopProtocol(self):
+        self.stop_count += 1
 
 
 class FakeProtocol(Protocol):
@@ -189,6 +198,7 @@ def test_udp_relay_port():
 
     relay_transport.startListening()
     assert user_proto.transport is relay_transport
+    assert user_proto.start_count == 1
 
     relay_transport.connect('1.2.3.4', 1234)
     assert relay_transport.connected_addr == relay_proto.connected_addr == ('1.2.3.4', 1234)
@@ -205,6 +215,7 @@ def test_udp_relay_port():
     # stopListening()
     relay_transport.stopListening()
     assert relay_transport.connected_addr is None
+    assert user_proto.stop_count == 1
 
     # write a un-connected transport
     relay_transport.write(b'zxcv', ('2.3.4.5', 2345))
