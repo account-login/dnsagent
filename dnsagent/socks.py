@@ -238,6 +238,17 @@ class UDPRelayTransport:
         return to_twisted_addr(host, port, type_='UDP')
 
     def connect(self, host, port):
+        """
+        Connect the transport to an address.
+
+        This changes it to connected mode. Datagrams can only be sent to
+        this address, and will only be received from this address. In addition
+        the protocol's connectionRefused method might get called if destination
+        is not receiving datagrams.
+
+        @param host: an IP address, not a domain name ('127.0.0.1', not 'localhost')
+        @param port: port to connect to.
+        """
         if self.connected_addr is not None:
             raise RuntimeError("already connected, reconnecting is not currently supported")
 
@@ -266,6 +277,24 @@ class UDPRelayTransport:
         host, port = addr
         host = to_socks_host(host)
         self.relay_proto.send_datagram(datagram, host, port, max_size=self.max_size)
+
+    def setBroadcastAllowed(self, enabled):
+        """
+        Set whether this port may broadcast.
+
+        @param enabled: Whether the port may broadcast.
+        @type enabled: L{bool}
+        """
+        raise NotImplementedError
+
+    def getBroadcastAllowed(self):
+        """
+        Checks if broadcast is currently allowed on this port.
+
+        @return: Whether this port may broadcast.
+        @rtype: L{bool}
+        """
+        return False
 
 
 @implementer(IReactorUDP)
