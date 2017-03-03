@@ -990,11 +990,10 @@ class BaseTestTCPRelayConnectorIntegrated(unittest.TestCase):
                 connector.disconnect()
 
         proto = TCPGreeter()
-        connector = TCPRelayConnector(
+        proxy = SocksProxy(self.server_host, self.server_port, reactor=self.reactor)
+        connector = proxy.connectTCP(
             self.service_host, self.service_port, OneshotClientFactory(proto),
-            proxy_addr=(self.server_host, self.server_port), reactor=self.reactor,
         )
-        connector.connect()
 
         proto.d.addCallback(got_reply)
         return proto.d

@@ -12,7 +12,9 @@ from twisted.internet.endpoints import (
     TCP4ClientEndpoint, TCP6ClientEndpoint, HostnameEndpoint, connectProtocol,
 )
 from twisted.internet.protocol import DatagramProtocol, Protocol, connectionDone, ClientFactory
-from twisted.internet.interfaces import IListeningPort, IUDPTransport, IReactorUDP, IConnector
+from twisted.internet.interfaces import (
+    IListeningPort, IUDPTransport, IReactorUDP, IReactorTCP, IConnector,
+)
 from twisted.internet.error import MessageLengthError, CannotListenError
 from twisted.python.failure import Failure
 from twisted.internet import address as taddress
@@ -648,6 +650,7 @@ def get_client_endpoint(reactor, addr: Tuple[str, int], **kwargs):
         return HostnameEndpoint(reactor, host.encode(), port, **kwargs)
 
 
+@implementer(IReactorTCP)
 class SocksProxy:
     def __init__(self, host: SocksHost, port: int, reactor=None):
         self.host, self.port = host, port
@@ -666,3 +669,20 @@ class SocksProxy:
         ctrl_connected.addCallbacks(proxy_connected, rv.errback)
 
         return rv
+
+    def connectTCP(
+            self, host: str, port: int, factory: ClientFactory,
+            timeout=30, bindAddress=None
+    ):
+        # TODO: timeouts
+        # TODO: bindAddress
+
+        connector = TCPRelayConnector(
+            host, port, factory,
+            proxy_addr=(str(self.host), self.port), reactor=self.reactor,
+        )
+        connector.connect()
+        return connector
+
+    def listenTCP(self, port, factory, backlog=50, interface=''):
+        raise NotImplementedError
