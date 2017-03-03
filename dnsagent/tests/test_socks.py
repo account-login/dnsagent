@@ -840,7 +840,10 @@ class TestTCPRelayConnector(unittest.TestCase):
     def test_run(self):
         assert not self.factory.started
         assert self.factory.connector is None
+        assert self.connector.state == 'disconnected'
+
         self.connector.connect()
+        assert self.connector.state == 'connecting'
         assert self.factory.started                     # startFactory() called
         assert self.factory.connector is self.connector # startedConnecting() called
 
@@ -852,9 +855,11 @@ class TestTCPRelayConnector(unittest.TestCase):
         assert ctrl_proto.transport.write_logs.pop() == (b'\5\1\0\1\1\2\3\4\x04\xd2', None)
 
         # reply to CONNECT request
+        assert self.connector.state == 'connecting'
         assert self.connector.user_proto.transport is None
         ctrl_proto.dataReceived(Socks5Reply(0, ip_address('9.8.7.6'), 0x9876).dumps())
         assert self.connector.user_proto.transport is ctrl_proto.transport
+        assert self.connector.state == 'connected'
 
         # send data through relay
         ctrl_proto.dataReceived(b'asdf')
@@ -865,6 +870,7 @@ class TestTCPRelayConnector(unittest.TestCase):
         assert self.connector.user_proto.lost
         assert self.factory.lost            # clientConnectionLost() called
         assert not self.factory.started     # stopFactory() called
+        assert self.connector.state == 'disconnected'
 
     def test_server_rejected(self):
         self.connector.connect()
@@ -872,12 +878,14 @@ class TestTCPRelayConnector(unittest.TestCase):
         self.connector.ctrl_proto.dataReceived(
             Socks5Reply(1, ip_address('9.8.7.6'), 0x9876).dumps()
         )
+        assert self.connector.state == 'disconnected'
         assert self.factory.failed
         assert not self.factory.started
 
     def test_auth_failed(self):
         self.connector.connect()
         self.connector.ctrl_proto.dataReceived(b'\5\xff')
+        assert self.connector.state == 'disconnected'
         assert self.factory.failed
         assert not self.factory.started
 
@@ -944,6 +952,7 @@ class TestTCPRelayConnector(unittest.TestCase):
 
         tr = self.connector.ctrl_proto.transport
         self.connector.disconnect()
+        assert self.connector.state == 'disconnected'
         assert not tr.connected
         assert self.connector.ctrl_proto.transport is self.connector.user_proto.transport is None
 

@@ -386,8 +386,10 @@ class TCPRelayConnector:
 
         def failed(failure):
             self.state = 'disconnected'
+
             if self.ctrl_proto.transport is not None:
                 self._disconnect_control_protocol() # triggers self.connection_lost()
+
             self.factory.clientConnectionFailed(self, failure)
             if self.state == 'disconnected':
                 self.factory.doStop()
@@ -416,9 +418,9 @@ class TCPRelayConnector:
         self.ctrl_connect_d.addErrback(errback)
 
     def connection_lost(self, failure):
-        if self.state == 'connected':   # preventing called from failed()
+        if self.state == 'connected':   # preventing called from connecting/disconnected state
             self.state = 'disconnected'
-            self.user_proto.connectionLost(failure)
+            self._disconnect_user_protocol(failure)
             self.factory.clientConnectionLost(self, failure)
             if self.state == 'disconnected':
                 self.factory.doStop()
@@ -442,6 +444,7 @@ class TCPRelayConnector:
             self._disconnect_control_protocol()
         else:
             raise RuntimeError('TCPRelayConnector already disconnected')
+        assert self.state == 'disconnected'
 
     def getDestination(self):
         raise NotImplementedError
@@ -449,8 +452,12 @@ class TCPRelayConnector:
     def _disconnect_control_protocol(self):
         self.ctrl_proto.transport.loseConnection()
         self.ctrl_proto.transport = None
+        self.connection_lost(connectionDone)
+
+    def _disconnect_user_protocol(self, reason=connectionDone):
         if self.user_proto and self.user_proto.transport:
             self.user_proto.transport = None
+            self.user_proto.connectionLost(reason)
 
 
 class BadSocks5Reply(Exception):
