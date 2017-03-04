@@ -88,3 +88,9 @@ ENV/
 
 # Rope project settings
 .ropeproject
+
+# TZ
+/.idea/
+/conf*.py
+/*.pcapng
+/*.txt
