@@ -1,4 +1,5 @@
 from ipaddress import ip_address, IPv4Address, IPv6Address
+from typing import Tuple, Sequence
 
 from twisted.internet import defer
 from twisted.names import dns
@@ -42,6 +43,14 @@ class FakeResolver(MyResolverBase):
     def set_answer(self, name: str, address: str, ttl=60):
         rr = make_rrheader(name, address, ttl=ttl)
         self.map[rr.name.name, rr.cls, rr.type] = ([rr], [], [])
+
+    def set_multiple_answer(self, name: str, addr_ttl: Sequence[Tuple[str, int]]):
+        for addr, ttl in addr_ttl:
+            rr = make_rrheader(name, addr, ttl=ttl)
+            key = (rr.name.name, rr.cls, rr.type)
+            if key not in self.map:
+                self.map[key] = ([], [], [])
+            self.map[key][0].append(rr)
 
     def __repr__(self):
         return '<Fake {:#x}>'.format(id(self))

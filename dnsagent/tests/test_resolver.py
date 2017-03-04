@@ -6,7 +6,9 @@ from twisted.internet import task, defer
 from twisted.names import dns
 
 from dnsagent.config import hosts
-from dnsagent.resolver import HostsResolver, CachingResolver, ParallelResolver
+from dnsagent.resolver import (
+    HostsResolver, CachingResolver, ParallelResolver, CnResolver,
+)
 from dnsagent.resolver.hosts import parse_hosts_file
 from dnsagent.utils import rrheader_to_ip
 from dnsagent.tests import iplist, FakeResolver, TestResolverBase
@@ -157,6 +159,29 @@ class TestParallelResolver(TestResolverBase):
         self.upstreams[1].delay = 0.02
 
         self.check_a('asdfasdf', fail=True)
+
+
+class TestCnResolver(TestResolverBase):
+    def setUp(self):
+        super().setUp()
+        self.fake_resolver = FakeResolver()
+        self.resolver = CnResolver(self.fake_resolver)
+
+    def test_cn(self):
+        self.fake_resolver.set_answer('asdf', '114.114.114.114')
+        self.check_a('asdf', iplist('114.114.114.114'))
+
+    def test_ab_single_addr(self):
+        self.fake_resolver.set_answer('asdf', '8.8.8.8')
+        self.check_a('asdf', fail=True)
+
+    def test_ab_multiple_addr(self):
+        self.fake_resolver.set_multiple_answer('asdf', [('8.8.8.8', 60), ('8.8.4.4', 60)])
+        self.check_a('asdf', iplist('8.8.8.8', '8.8.4.4'))
+
+    def test_ipv6(self):
+        self.fake_resolver.set_answer('asdf', '2001:400::')
+        self.check_a('asdf', fail=True)
 
 
 del TestResolverBase
