@@ -1,4 +1,5 @@
 # TODO: round robin
+# TODO: recursive resolver
 # TODO: edns_client_subnet
 # TODO: dns over https, https://developers.google.com/speed/public-dns/docs/dns-over-https
 # TODO: statistics

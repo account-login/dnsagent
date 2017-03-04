@@ -53,7 +53,7 @@ class BadSocksHost(Exception):
     pass
 
 
-class InsufficientData(Exception):
+class InsufficientData(EOFError):
     pass
 
 
