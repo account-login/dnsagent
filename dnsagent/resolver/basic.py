@@ -95,6 +95,4 @@ class ExtendedResolver(BaseResolver):
 
 class TCPExtendedResolver(ExtendedResolver):
     def queryUDP(self, queries, timeout=None):
-        if timeout is None:
-            timeout = [10]
-        return self.queryTCP(queries, timeout[0])
+        return self.queryTCP(queries)
