@@ -9,7 +9,7 @@ from twisted.names.error import ResolverError
 
 from dnsagent.config import hosts
 from dnsagent.resolver import (
-    HostsResolver, CachingResolver, ParallelResolver, CnResolver,
+    HostsResolver, CachingResolver, ParallelResolver, CnResolver, DualResolver,
 )
 from dnsagent.resolver.hosts import parse_hosts_file
 from dnsagent.resolver.parallel import (
@@ -230,6 +230,64 @@ class TestPoliciedParallelResolver(TestResolverBase):
             ups.set_answer('asdf', '1.2.3.4')
 
         self.check_a('asdf', fail=MyException)
+
+
+class TestDualResovler(TestResolverBase):
+    def setUp(self):
+        super().setUp()
+        self.cn_resolver = FakeResolver()
+        self.ab_resolver = FakeResolver()
+        self.resolver = DualResolver(self.cn_resolver, self.ab_resolver)
+
+    ips = dict(
+        C1='114.114.114.114',
+        C2='202.202.202.202',
+        A1='8.8.8.8',
+        A2='8.8.4.4',
+        FA=None,    # indicates failure
+    )
+
+    cases = [
+        ('C1', 'C2', 'C1'),
+        ('C1', 'A2', 'C1'),
+        ('A1', 'C2', 'C2'),
+        ('A1', 'A2', 'A2'),
+
+        ('FA', 'FA', 'FA'),
+        ('A1', 'FA', 'FA'),
+        ('C1', 'FA', 'C1'),
+        ('FA', 'A2', 'A2'),
+        ('FA', 'C2', 'C2'),
+    ]
+
+    def make_test(cn, ab, expected, order: bool):
+        delays = {
+            True: (0, 0.01),
+            False: (0.01, 0),
+        }
+
+        def test_func(self: 'TestDualResovler'):
+            cn_ip, ab_ip, expected_ip = (self.ips[x] for x in (cn, ab, expected))
+            if cn_ip:
+                self.cn_resolver.set_answer('asdf', cn_ip)
+            self.cn_resolver.delay = delays[order][0]
+            if ab_ip:
+                self.ab_resolver.set_answer('asdf', ab_ip)
+            self.ab_resolver.delay = delays[order][1]
+
+            if expected_ip:
+                self.check_a('asdf', iplist(expected_ip))
+            else:
+                self.check_a('asdf', fail=True)
+
+        test_func.__name__ = 'test_%s_%s_%r' % (cn, ab, order)
+        return test_func
+
+    for cn, ab, expected in cases:
+        for order in (True, False):
+            locals()['test_%s_%s_%r' % (cn, ab, order)] = make_test(cn, ab, expected, order)
+
+    del make_test
 
 
 del TestResolverBase

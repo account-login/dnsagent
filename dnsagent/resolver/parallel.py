@@ -41,14 +41,15 @@ class ParalledQueryHandler:
         self.para_resolver = para_resolver
         self.finished = False
         self.result_d = result_d
-        self.results = [None] * len(para_resolver.resolvers)
+        self.results = [None] * len(self.para_resolver.resolvers)
         self.query_ds = [
             res.query(query, timeout=timeout, **kwargs).addBoth(self.update_results, i)
-            for i, res in enumerate(para_resolver.resolvers)
+            for i, res in enumerate(self.para_resolver.resolvers)
         ]
 
         request_id = kwargs.get('request_id', -1)
-        self.logger = PrefixedLogger(logger, '[%d]%s: ' % (request_id, self.__class__.__name__))
+        cls_name = self.para_resolver.__class__.__name__
+        self.logger = PrefixedLogger(logger, '[%d]%s: ' % (request_id, cls_name))
 
         self.reactor = get_reactor(reactor)
 
@@ -108,11 +109,12 @@ class PoliciedParallelResolver(MyResolverBase):
         ParalledQueryHandler(self, d, query, timeout=timeout, **kwargs)
         return d
 
+    def __repr__(self):
+        cls_name = type(self).__name__
+        sub = '|'.join(map(repr, self.resolvers))
+        return '<{cls_name} {sub}>'.format_map(locals())
+
 
 class ParallelResolver(PoliciedParallelResolver):
     def __init__(self, resolvers: Sequence, policy=FirstOnePolicy()):
         super().__init__(resolvers, policy)
-
-    def __repr__(self):
-        sub = '|'.join(map(repr, self.resolvers))
-        return '<Parallel {}>'.format(sub)

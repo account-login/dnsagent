@@ -3,7 +3,7 @@ from typing import NamedTuple
 
 from dnsagent.resolver import (
     ExtendedResolver, TCPExtendedResolver, ParallelResolver, ChainedResolver,
-    DualResovlver, HostsResolver, CachingResolver,
+    DualResolver, HostsResolver, CachingResolver,
 )
 from dnsagent.server import MyDNSServerFactory
 from dnsagent.socks import SocksProxy
@@ -59,7 +59,7 @@ def parallel(resolvers):
 def dual(cn, ab):
     cn = make_resolver(cn)
     ab = make_resolver(ab)
-    return DualResovlver(cn, ab)
+    return DualResolver(cn, ab)
 
 
 def hosts(filename_or_mapping=None, *, ttl=5*60, reload=False):
