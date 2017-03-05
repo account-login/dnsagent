@@ -2,12 +2,18 @@ import sys
 import logging
 from logging.handlers import MemoryHandler
 from argparse import ArgumentParser
+from typing import Tuple, Sequence
+
+from twisted.internet.protocol import ServerFactory
 from twisted.internet import defer
 from twisted.names.dns import DNSDatagramProtocol
 from twisted.python.log import PythonLoggingObserver
 
 from dnsagent import logger
 from dnsagent.utils import watch_modification, get_reactor
+
+
+ServerInfo = Tuple[ServerFactory, Sequence[Tuple[str, int]]]
 
 
 def eval_config_file(filename):
@@ -23,14 +29,14 @@ class App:
         self.ports = []
         self._is_running = False
 
-    def start(self, server_info):
+    def start(self, server_info: ServerInfo):
         assert not self._is_running
         logger.info('starting server: %s', server_info)
         self._start(server_info)
         logger.info('started')
         self._is_running = True
 
-    def _start(self, server_info):
+    def _start(self, server_info: ServerInfo):
         factory, binds = server_info
         self.ports.clear()
         for interface, port in binds:
@@ -48,15 +54,15 @@ class App:
         logger.info('listening tcp port %s', port)
         return tcp_port
 
-    def restart(self, server_info):
+    def restart(self, server_info: ServerInfo):
         assert self._is_running
         logger.info('restarting: %s', server_info)
         self.reactor.callFromThread(self._restart, server_info)
 
-    def _restart(self, server_info):
+    def _restart(self, server_info: ServerInfo):
         self.stop().addBoth(lambda ignore: self._start(server_info))
 
-    def run(self, server_info):
+    def run(self, server_info: ServerInfo):
         if self._is_running:
             self.restart(server_info)
         else:
@@ -84,7 +90,7 @@ class ConfigLoader:
             return False
 
         try:
-            server_info = config['SERVER']
+            server_info = config['SERVER']  # type: ServerInfo
         except KeyError:
             logger.error('No `SERVER` varible found in configuration file.')
             return False

@@ -1,6 +1,7 @@
 import os
 from typing import NamedTuple
 
+from dnsagent.app import ServerInfo
 from dnsagent.resolver import (
     ExtendedResolver, TCPExtendedResolver, ParallelResolver, ChainedResolver,
     DualResolver, HostsResolver, CachingResolver, CnResolver,
@@ -83,14 +84,11 @@ def cache(resolver):
     return CachingResolver(make_resolver(resolver))
 
 
-def _make_server(resolver, *, verbose=5, timeout=None):
-    return MyDNSServerFactory(resolver=resolver, verbose=verbose, resolve_timeout=timeout)
+def _make_server(resolver, *, timeout=None):
+    return MyDNSServerFactory(resolver=resolver, resolve_timeout=timeout)
 
 
-def server(
-        resolver, *, port=None, interface=None, binds=None,
-        verbose=5, timeout=None
-):
+def server(resolver, *, port=None, interface=None, binds=None, timeout=None) -> ServerInfo:
     if binds is None:
         if port is None:
             port = 53
@@ -100,7 +98,5 @@ def server(
     else:
         assert port is interface is None
 
-    return (
-        _make_server(make_resolver(resolver), verbose=verbose, timeout=timeout),
-        binds,
-    )
+    srv = _make_server(make_resolver(resolver), timeout=timeout)
+    return srv, binds

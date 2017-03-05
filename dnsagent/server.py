@@ -6,8 +6,8 @@ from dnsagent import logger
 
 
 class MyDNSServerFactory(DNSServerFactory):
-    def __init__(self, resolver, resolve_timeout=None, verbose=0):
-        super().__init__(clients=[resolver], verbose=verbose)
+    def __init__(self, resolver, resolve_timeout=None):
+        super().__init__(clients=[resolver])
         self.resolver = resolver    # overide ResolverChain set in super().__init__()
         self.resolve_timeout = resolve_timeout or [5]
 
