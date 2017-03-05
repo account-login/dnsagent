@@ -114,7 +114,7 @@ class PoliciedParallelResolver(MyResolverBase):
 
     def _lookup(self, name, cls, type_, timeout, **kwargs):
         query = dns.Query(name, type_, cls)
-        d = defer.Deferred()
+        d = defer.Deferred()    # TODO: make this cancellable
         ParalledQueryHandler(self, d, query, timeout=timeout, **kwargs)
         return d
 

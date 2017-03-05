@@ -3,7 +3,7 @@ from typing import NamedTuple
 
 from dnsagent.resolver import (
     ExtendedResolver, TCPExtendedResolver, ParallelResolver, ChainedResolver,
-    DualResolver, HostsResolver, CachingResolver,
+    DualResolver, HostsResolver, CachingResolver, CnResolver,
 )
 from dnsagent.server import MyDNSServerFactory
 from dnsagent.socks import SocksProxy
@@ -12,7 +12,7 @@ from dnsagent.utils import parse_url
 from twisted.names.common import ResolverBase
 
 
-__all__ = ('make_resolver', 'chain', 'parallel', 'dual', 'hosts', 'cache', 'server')
+__all__ = ('make_resolver', 'chain', 'parallel', 'dual', 'cn_filter', 'hosts', 'cache', 'server')
 
 
 def parse_proxy_string(string: str) -> SocksProxy:
@@ -60,6 +60,10 @@ def dual(cn, ab):
     cn = make_resolver(cn)
     ab = make_resolver(ab)
     return DualResolver(cn, ab)
+
+
+def cn_filter(resolver):
+    return CnResolver(make_resolver(resolver))
 
 
 def hosts(filename_or_mapping=None, *, ttl=5*60, reload=False):
