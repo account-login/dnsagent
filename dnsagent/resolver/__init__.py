@@ -5,6 +5,7 @@
 # TODO: statistics
 # TODO: persistant tcp connection
 # TODO: dispaching based on input
+# TODO: adblocker
 # TODO: structured log
 
 

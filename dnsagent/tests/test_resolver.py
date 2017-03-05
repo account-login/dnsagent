@@ -12,6 +12,7 @@ from dnsagent.resolver import (
     HostsResolver, CachingResolver, ParallelResolver, CnResolver, DualResolver,
 )
 from dnsagent.resolver.hosts import parse_hosts_file
+from dnsagent.resolver.cn import MayBePolluted
 from dnsagent.resolver.parallel import (
     PoliciedParallelResolver, BaseParalledResolverPolicy,
 )
@@ -178,7 +179,7 @@ class TestCnResolver(TestResolverBase):
 
     def test_ab_single_addr(self):
         self.fake_resolver.set_answer('asdf', '8.8.8.8')
-        self.check_a('asdf', fail=True)
+        self.check_a('asdf', fail=MayBePolluted)
 
     def test_ab_multiple_addr(self):
         self.fake_resolver.set_multiple_answer('asdf', [('8.8.8.8', 60), ('8.8.4.4', 60)])
@@ -186,7 +187,7 @@ class TestCnResolver(TestResolverBase):
 
     def test_ipv6(self):
         self.fake_resolver.set_answer('asdf', '2001:400::')
-        self.check_a('asdf', fail=True)
+        self.check_aaaa('asdf', fail=MayBePolluted)
 
 
 class NullPolicy(BaseParalledResolverPolicy):

@@ -101,7 +101,7 @@ class TestResolverBase(unittest.TestCase):
             logger.info('query %r failed: %r', query, failure)
             if not fail:
                 self.fail('query failed unexpectly')
-            if isinstance(fail, Exception):
+            if isinstance(fail, type) and issubclass(fail, Exception):
                 assert isinstance(failure.value, fail), 'Failure type mismatch'
 
         d = self.resolver.query(query, timeout=[0.5])
