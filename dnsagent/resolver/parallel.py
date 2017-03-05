@@ -1,110 +1,118 @@
+from typing import Sequence
+
 from twisted.internet import defer
 from twisted.names import dns
-from twisted.names.error import DomainError
+from twisted.names.error import ResolverError
 from twisted.python.failure import Failure
 
 from dnsagent import logger
 from dnsagent.resolver.base import MyResolverBase
-from dnsagent.utils import PrefixedLogger
+from dnsagent.utils import PrefixedLogger, get_reactor
 
 
-__all__ = ('ParallelResolver',)
+__all__ = ('ParallelResolver', 'BaseParalledResolverPolicy')
 
 
-class ParallelResolver(MyResolverBase):
-    """
-    Lookup an address using multiple L{IResolver}s in parallel.
-    """
-    def __init__(self, resolvers):
+class BaseParalledResolverPolicy:
+    def for_results(self, results: Sequence):
         """
-        @type resolvers: L{list}
-        @param resolvers: A L{list} of L{IResolver} providers.
+        :param results: list of query result or L{Failure} or None
+        :return: 
+            Return None to wait for other results, 
+            or return index number to pick up a result,
+            or raise an exception to indicate a failure.
         """
+        raise NotImplementedError
+
+
+class FirstOnePolicy(BaseParalledResolverPolicy):
+    def for_results(self, results: Sequence):
+        for i, res in enumerate(results):
+            if res and not isinstance(res, Failure):
+                return i
+        return None
+
+
+class ParalledQueryHandler:
+    def __init__(
+            self, para_resolver: 'PoliciedParallelResolver', result_d: defer.Deferred,
+            query: dns.Query, timeout, reactor=None, **kwargs
+    ):
+        self.para_resolver = para_resolver
+        self.finished = False
+        self.result_d = result_d
+        self.results = [None] * len(para_resolver.resolvers)
+        self.query_ds = [
+            res.query(query, timeout=timeout, **kwargs).addBoth(self.update_results, i)
+            for i, res in enumerate(para_resolver.resolvers)
+        ]
+
+        request_id = kwargs.get('request_id', -1)
+        self.logger = PrefixedLogger(logger, '[%d]%s: ' % (request_id, self.__class__.__name__))
+
+        self.reactor = get_reactor(reactor)
+
+    def cancel_all(self):
+        for d in self.query_ds:
+            d.cancel()
+
+    def resolve_success(self, index: int):
+        self.logger.info('pick %r', self.para_resolver.resolvers[index])
+        self.finished = True
+        try:
+            self.result_d.callback(self.results[index])
+        finally:
+            self.reactor.callLater(0, self.cancel_all)
+
+    def resolve_fail(self, err=None):
+        self.logger.error('failed: %r', err)
+        self.finished = True
+        try:
+            self.result_d.errback(err or Failure())
+        finally:
+            self.reactor.callLater(0, self.cancel_all)
+
+    def update_results(self, result, index: int):
+        verb = {True: 'failed', False: 'got'}[isinstance(result, Failure)]
+        self.logger.debug('%r %s: %r', self.para_resolver.resolvers[index], verb, result)
+        self.results[index] = result
+        if self.finished:
+            return
+
+        try:
+            picked = self.para_resolver.policy.for_results(self.results)
+        except Exception:
+            self.resolve_fail()
+            return
+
+        if picked is not None:
+            assert isinstance(picked, int)
+            self.resolve_success(picked)
+            return
+
+        # all resolver finished
+        if all(res is not None for res in self.results):
+            self.resolve_fail(Failure(ResolverError('no result selected')))
+
+
+class PoliciedParallelResolver(MyResolverBase):
+    def __init__(self, resolvers: Sequence, policy: BaseParalledResolverPolicy):
         super().__init__()
+        assert len(resolvers) > 0
         self.resolvers = resolvers
+        self.policy = policy
 
     def _lookup(self, name, cls, type_, timeout, **kwargs):
-        """
-        Build a L{dns.Query} for the given parameters and dispatch it
-        to each L{IResolver} in C{self.resolvers} until an answer or
-        L{error.AuthoritativeDomainError} is returned.
-
-        @type name: C{str}
-        @param name: DNS name to resolve.
-
-        @type type_: C{int}
-        @param type_: DNS record type.
-
-        @type cls: C{int}
-        @param cls: DNS record class.
-
-        @type timeout: Sequence of C{int}
-        @param timeout: Number of seconds after which to reissue the query.
-            When the last timeout expires, the query is considered failed.
-
-        @rtype: L{Deferred}
-        @return: A L{Deferred} which fires with a three-tuple of lists of
-            L{twisted.names.dns.RRHeader} instances.  The first element of the
-            tuple gives answers.  The second element of the tuple gives
-            authorities.  The third element of the tuple gives additional
-            information.  The L{Deferred} may instead fail with one of the
-            exceptions defined in L{twisted.names.error} or with
-            C{NotImplementedError}.
-        """
-        if not self.resolvers:
-            return defer.fail(DomainError())
-
-        q = dns.Query(name, type_, cls)
+        query = dns.Query(name, type_, cls)
         d = defer.Deferred()
-        ResolverHub(q, timeout, self.resolvers, d, **kwargs)
+        ParalledQueryHandler(self, d, query, timeout=timeout, **kwargs)
         return d
+
+
+class ParallelResolver(PoliciedParallelResolver):
+    def __init__(self, resolvers: Sequence, policy=FirstOnePolicy()):
+        super().__init__(resolvers, policy)
 
     def __repr__(self):
         sub = '|'.join(map(repr, self.resolvers))
         return '<Parallel {}>'.format(sub)
-
-
-class ResolverHub:
-    def __init__(self, query, timeout, resolvers, output: defer.Deferred, **kwargs):
-        self.resolvers = resolvers
-        self.inputs = []
-        self.output = output
-        self.succeeded = False
-        self.errcount = 0
-
-        log_prefix = '[%d]' % kwargs.get('request_id', -1)
-        self.logger = PrefixedLogger(logger, log_prefix)
-
-        for res in resolvers:
-            d = res.query(query, timeout=timeout, **kwargs)
-            d.addCallbacks(
-                callback=self.success, callbackArgs=[res],
-                errback=self.fail, errbackArgs=[res],
-            )
-            self.inputs.append(d)
-
-    def success(self, result, resolver):
-        self.logger.info(
-            'success! %r, succeeded: %s, result: %s',
-            resolver, self.succeeded, result)
-        if not self.succeeded:
-            self.succeeded = True
-            self.output.callback(result)
-            # cancel other attempts
-            for d, res in zip(self.inputs, self.resolvers):
-                if res is not resolver:
-                    d.cancel()
-
-    def fail(self, failure: Failure, resolver):
-        if isinstance(failure.value, defer.CancelledError):
-            self.logger.info('canceled! %r', resolver)
-        else:
-            self.logger.info(
-                'fail! %r, succeeded: %s, failure: %s',
-                resolver, self.succeeded, failure)
-        if not self.succeeded:
-            self.errcount += 1
-            # all failed
-            self.logger.info('all fail! %r', self.resolvers)
-            if self.errcount == len(self.inputs):
-                self.output.errback(failure)

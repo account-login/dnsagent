@@ -1,5 +1,6 @@
 from ipaddress import ip_address, IPv4Address, IPv6Address
 from typing import Tuple, Sequence
+import logging
 
 from twisted.internet import defer
 from twisted.names import dns
@@ -9,6 +10,9 @@ from twisted.trial import unittest
 from dnsagent.app import init_log, enable_log
 from dnsagent.utils import rrheader_to_ip, get_reactor
 from dnsagent.resolver.base import MyResolverBase
+
+
+logger = logging.getLogger(__name__)
 
 
 init_log()
@@ -81,41 +85,43 @@ class TestResolverBase(unittest.TestCase):
     def tearDown(self):
         return defer.DeferredList(self.defereds, fireOnOneErrback=True)
 
-    def _check_query(self, query: dns.Query, expect=None, fail=False):
+    def _check_query(self, query: dns.Query, expect=None, fail=None):
         if fail:
             assert expect is None
 
         def check_result(result):
+            logger.info('query %r got: %r', query, result)
             if fail:
-                self.fail('dns failure expected')
+                self.fail('query failure expected')
 
             ans, auth, add = result
             assert [rrheader_to_ip(rr) for rr in ans] == expect
 
-        def failed(failure):
+        def failed(failure: Failure):
+            logger.info('query %r failed: %r', query, failure)
             if not fail:
-                print('query failed: ', query)
-                print(failure)
-                self.fail('query failed')
+                self.fail('query failed unexpectly')
+            if isinstance(fail, Exception):
+                assert isinstance(failure.value, fail), 'Failure type mismatch'
 
         d = self.resolver.query(query, timeout=[0.5])
         d.addCallbacks(check_result, failed)
         self.defereds.append(d)
         return d
 
-    def check_a(self, name: str, expect=None, fail=False):
+    def check_a(self, name: str, expect=None, fail=None):
         return self._check_query(
             dns.Query(name.encode('utf8'), dns.A, dns.IN),
             expect=expect, fail=fail,
         )
 
-    def check_aaaa(self, name: str, expect=None, fail=False):
+    def check_aaaa(self, name: str, expect=None, fail=None):
         return self._check_query(
             dns.Query(name.encode('utf8'), dns.AAAA, dns.IN),
             expect=expect, fail=fail,
         )
 
-    def check_all(self, name: str, expect=None, fail=False):
+    def check_all(self, name: str, expect=None, fail=None):
         return self._check_query(
             dns.Query(name.encode('utf8'), dns.ALL_RECORDS, dns.IN),
             expect=expect, fail=fail,

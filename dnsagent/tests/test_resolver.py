@@ -1,15 +1,20 @@
 import os
 import tempfile
 from ipaddress import IPv4Address
+from typing import Sequence
 
 from twisted.internet import task, defer
 from twisted.names import dns
+from twisted.names.error import ResolverError
 
 from dnsagent.config import hosts
 from dnsagent.resolver import (
     HostsResolver, CachingResolver, ParallelResolver, CnResolver,
 )
 from dnsagent.resolver.hosts import parse_hosts_file
+from dnsagent.resolver.parallel import (
+    PoliciedParallelResolver, BaseParalledResolverPolicy,
+)
 from dnsagent.utils import rrheader_to_ip
 from dnsagent.tests import iplist, FakeResolver, TestResolverBase
 
@@ -182,6 +187,49 @@ class TestCnResolver(TestResolverBase):
     def test_ipv6(self):
         self.fake_resolver.set_answer('asdf', '2001:400::')
         self.check_a('asdf', fail=True)
+
+
+class NullPolicy(BaseParalledResolverPolicy):
+    def for_results(self, results: Sequence):
+        return None
+
+
+class ExceptionPolicy(BaseParalledResolverPolicy):
+    def __init__(self, exc_value):
+        self.exc_value = exc_value
+
+    def for_results(self, results: Sequence):
+        raise self.exc_value
+
+
+class TestPoliciedParallelResolver(TestResolverBase):
+    # TODO: more tests
+
+    def setUp(self):
+        super().setUp()
+        self.upstreams = [FakeResolver(), FakeResolver()]
+
+    def test_no_result_selected(self):
+        self.resolver = PoliciedParallelResolver(self.upstreams, NullPolicy())
+        for ups in self.upstreams:
+            ups.set_answer('asdf', '1.2.3.4')
+
+        self.check_a('asdf', fail=ResolverError)
+
+    def test_all_fail(self):
+        self.resolver = PoliciedParallelResolver(self.upstreams, NullPolicy())
+        self.check_a('asdf', fail=ResolverError)
+
+    def test_exception(self):
+        class MyException(Exception):
+            pass
+
+        policy = ExceptionPolicy(MyException('asdf'))
+        self.resolver = PoliciedParallelResolver(self.upstreams, policy)
+        for ups in self.upstreams:
+            ups.set_answer('asdf', '1.2.3.4')
+
+        self.check_a('asdf', fail=MyException)
 
 
 del TestResolverBase
