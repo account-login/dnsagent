@@ -4,6 +4,7 @@ from twisted.names.error import DomainError
 from twisted.names.resolve import ResolverChain as OriginResolverChain
 
 from dnsagent.resolver.base import patch_resolver
+from dnsagent.utils import repr_short
 
 
 __all__ = ('ChainedResolver',)
@@ -48,7 +49,7 @@ class ChainedResolver(OriginResolverChain):
         return d
 
     def __repr__(self):
-        sub = '|'.join(map(repr, self.resolvers))
+        sub = '|'.join(map(repr_short, self.resolvers))
         return '<Chain {}>'.format(sub)
 
 
