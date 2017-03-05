@@ -17,7 +17,7 @@ from dnsagent.resolver.parallel import (
     PoliciedParallelResolver, BaseParalledResolverPolicy,
 )
 from dnsagent.utils import rrheader_to_ip
-from dnsagent.tests import iplist, FakeResolver, TestResolverBase
+from dnsagent.tests import iplist, FakeResolver, BaseTestResolver
 
 
 def test_parse_hosts_file():
@@ -43,7 +43,7 @@ def test_parse_hosts_file():
     )
 
 
-class TestHostsResolver(TestResolverBase):
+class TestHostsResolver(BaseTestResolver):
     def setUp(self):
         super().setUp()
 
@@ -69,7 +69,7 @@ class TestHostsResolver(TestResolverBase):
         self.check_a('asdf.asdf', fail=True)
 
 
-class TestHostResolverMapping(TestResolverBase):
+class TestHostResolverMapping(BaseTestResolver):
     def setUp(self):
         super().setUp()
         self.resolver = HostsResolver(mapping=dict(ASDF='1.2.3.4', localhost='::1'))
@@ -89,7 +89,7 @@ def test_config_hosts():
     assert resolver.name2ip == dict(abc=iplist('1.2.3.4'))
 
 
-class TestCachingResolver(TestResolverBase):
+class TestCachingResolver(BaseTestResolver):
     def setUp(self):
         super().setUp()
         self.fake_resolver = FakeResolver()
@@ -130,7 +130,7 @@ class TestCachingResolver(TestResolverBase):
         return final
 
 
-class TestParallelResolver(TestResolverBase):
+class TestParallelResolver(BaseTestResolver):
     def setUp(self):
         super().setUp()
         self.upstreams = [FakeResolver(), FakeResolver()]
@@ -167,7 +167,7 @@ class TestParallelResolver(TestResolverBase):
         self.check_a('asdfasdf', fail=True)
 
 
-class TestCnResolver(TestResolverBase):
+class TestCnResolver(BaseTestResolver):
     def setUp(self):
         super().setUp()
         self.fake_resolver = FakeResolver()
@@ -203,7 +203,7 @@ class ExceptionPolicy(BaseParalledResolverPolicy):
         raise self.exc_value
 
 
-class TestPoliciedParallelResolver(TestResolverBase):
+class TestPoliciedParallelResolver(BaseTestResolver):
     # TODO: more tests
 
     def setUp(self):
@@ -233,7 +233,7 @@ class TestPoliciedParallelResolver(TestResolverBase):
         self.check_a('asdf', fail=MyException)
 
 
-class TestDualResovler(TestResolverBase):
+class TestDualResovler(BaseTestResolver):
     def setUp(self):
         super().setUp()
         self.cn_resolver = FakeResolver()
@@ -291,4 +291,4 @@ class TestDualResovler(TestResolverBase):
     del make_test
 
 
-del TestResolverBase
+del BaseTestResolver

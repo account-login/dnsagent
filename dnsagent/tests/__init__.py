@@ -77,7 +77,7 @@ def make_rrheader(name: str, address: str, ttl=60):
     )
 
 
-class TestResolverBase(unittest.TestCase):
+class BaseTestResolver(unittest.TestCase):
     def setUp(self):
         self.defereds = []
         self.resolver = None

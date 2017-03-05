@@ -10,7 +10,7 @@ from dnsagent.utils import parse_url, ParsedURL, BadURL
 from dnsagent.config import parse_dns_server_string, DnsServerInfo
 from dnsagent.resolver import ExtendedResolver
 from dnsagent.server import MyDNSServerFactory
-from dnsagent.tests import iplist, FakeResolver, TestResolverBase
+from dnsagent.tests import iplist, FakeResolver, BaseTestResolver
 
 
 class BaseTestParseURL(unittest.TestCase):
@@ -58,7 +58,7 @@ class TestParseDnsServerString(BaseTestParseURL):
         return super().good(string, scheme, host, port)
 
 
-class TestApp(TestResolverBase):
+class TestApp(BaseTestResolver):
     def setUp(self):
         super().setUp()
         self.apps = []
@@ -99,4 +99,4 @@ class TestApp(TestResolverBase):
 
 
 del BaseTestParseURL
-del TestResolverBase
+del BaseTestResolver
