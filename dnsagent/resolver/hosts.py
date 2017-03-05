@@ -70,8 +70,7 @@ class HostsResolver(MyResolverBase):
 
         if filename is not None:
             assert mapping is None
-            logger.debug('loading hosts file: %s', self.filename)
-            self.name2ip = read_hosts_file(self.filename)
+            self._load_hosts()
             if reload:
                 watch_modification(filename, self._load_hosts)
         elif mapping is not None:
@@ -79,6 +78,10 @@ class HostsResolver(MyResolverBase):
                 domain.lower(): [ ip_address(ip) ]
                 for domain, ip in mapping.items()
             }
+
+    def _load_hosts(self):
+        logger.debug('loading hosts file: %s', self.filename)
+        self.name2ip = read_hosts_file(self.filename)
 
     def _get_a_records(self, name: bytes):
         """
