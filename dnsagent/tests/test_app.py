@@ -69,8 +69,9 @@ class TestApp(TestResolverBase):
         return d
 
     def clean_apps(self, final: defer.Deferred):
-        return defer.gatherResults(
-            [ app.stop() for app in self.apps ]).addBoth(lambda ignore: final.callback(None))
+        return defer.DeferredList(
+            [ app.stop() for app in self.apps ]
+        ).addBoth(lambda ignore: final.callback(None))
 
     def set_resolver(self, resolver):
         server = MyDNSServerFactory(resolver=resolver)

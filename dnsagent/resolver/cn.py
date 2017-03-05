@@ -5,7 +5,7 @@ from iprir.ipset import IpSet
 from twisted.names import dns
 
 from dnsagent.resolver import MyResolverBase
-from dnsagent.utils import rrheader_to_ip
+from dnsagent.utils import rrheader_to_ip, repr_short
 
 
 __all__ = ('CnResolver',)
@@ -48,3 +48,8 @@ class CnResolver(MyResolverBase):
             if ip and not self.is_cn_ip(ip):
                 raise MayBePolluted(ip)
         return result
+
+    def __repr__(self):
+        cls_name = type(self).__name__
+        sub = repr_short(self.upstream)
+        return '<{cls_name} {sub}>'.format_map(locals())

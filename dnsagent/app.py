@@ -63,10 +63,9 @@ class App:
             self.start(server_info)
 
     def stop(self):
-        return defer.DeferredList(
-            [ defer.maybeDeferred(port.stopListening) for port in self.ports ],
-            consumeErrors=True,
-        )
+        return defer.DeferredList([
+            defer.maybeDeferred(port.stopListening) for port in self.ports
+        ])
 
 
 class ConfigLoader:

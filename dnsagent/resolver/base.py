@@ -4,6 +4,7 @@ from twisted.names.common import ResolverBase
 from twisted.python.failure import Failure
 
 from dnsagent import logger
+from dnsagent.utils import repr_short
 
 
 __all__ = ('MyResolverBase', 'patch_resolver')
@@ -16,7 +17,7 @@ class MyResolverBase(ResolverBase):
     """
     def query(self, query, timeout=None, **kwargs):
         request_id = kwargs.get('request_id', -1)
-        logger.info('[%d]%r.query(%r)', request_id, self, query)
+        logger.info('[%d](%s).query(%r)', request_id, repr_short(self), query)
         try:
             method = self.typeToMethod[query.type]
         except KeyError:

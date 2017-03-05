@@ -7,7 +7,7 @@ from twisted.python.failure import Failure
 
 from dnsagent import logger
 from dnsagent.resolver.base import MyResolverBase
-from dnsagent.utils import PrefixedLogger, get_reactor
+from dnsagent.utils import PrefixedLogger, get_reactor, repr_short
 
 
 __all__ = ('ParallelResolver', 'BaseParalledResolverPolicy')
@@ -58,7 +58,7 @@ class ParalledQueryHandler:
             d.cancel()
 
     def resolve_success(self, index: int):
-        self.logger.info('pick %r', self.para_resolver.resolvers[index])
+        self.logger.info('pick %s', repr_short(self.para_resolver.resolvers[index]))
         self.finished = True
         try:
             self.result_d.callback(self.results[index])
@@ -66,16 +66,25 @@ class ParalledQueryHandler:
             self.reactor.callLater(0, self.cancel_all)
 
     def resolve_fail(self, err=None):
-        self.logger.error('failed: %r', err)
+        err = err or Failure()
+        self.logger.info('failed: %r', err)
         self.finished = True
         try:
-            self.result_d.errback(err or Failure())
+            self.result_d.errback(err)
         finally:
             self.reactor.callLater(0, self.cancel_all)
 
     def update_results(self, result, index: int):
-        verb = {True: 'failed', False: 'got'}[isinstance(result, Failure)]
-        self.logger.debug('%r %s: %r', self.para_resolver.resolvers[index], verb, result)
+        if isinstance(result, Failure):
+            if isinstance(result.value, defer.CancelledError):
+                verb = 'canceled'
+            else:
+                verb = 'failed'
+        else:
+            verb = 'got'
+
+        resolver = self.para_resolver.resolvers[index]
+        self.logger.debug('%s: resolver=%s, result=%r', verb, repr_short(resolver), result)
         self.results[index] = result
         if self.finished:
             return
@@ -111,7 +120,7 @@ class PoliciedParallelResolver(MyResolverBase):
 
     def __repr__(self):
         cls_name = type(self).__name__
-        sub = '|'.join(map(repr, self.resolvers))
+        sub = '|'.join(map(repr_short, self.resolvers))
         return '<{cls_name} {sub}>'.format_map(locals())
 
 

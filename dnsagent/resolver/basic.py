@@ -16,9 +16,16 @@ class BaseResolver(OriginResolver):
         return super()._lookup(name, cls, type, timeout=timeout)
 
     def __repr__(self):
-        ip, port = self.servers[0]
         cls = self.__class__.__name__
-        return '<{cls} {ip}:{port}>'.format_map(locals())
+        addr = self._repr_short_()
+        return '<{cls} {addr}>'.format_map(locals())
+
+    def _repr_short_(self):
+        ip, port = self.servers[0]
+        if port != 53:
+            return '{ip}:{port}'.format_map(locals())
+        else:
+            return ip
 
 
 class DNSDatagramProtocolOverSocks(DNSDatagramProtocol):
@@ -96,3 +103,6 @@ class ExtendedResolver(BaseResolver):
 class TCPExtendedResolver(ExtendedResolver):
     def queryUDP(self, queries, timeout=None):
         return self.queryTCP(queries)
+
+    def _repr_short_(self):
+        return 'tcp://' + super()._repr_short_()
