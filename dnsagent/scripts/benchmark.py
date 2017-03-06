@@ -3,20 +3,17 @@ from ipaddress import ip_address
 from itertools import chain
 import logging
 from multiprocessing import Process, Queue
-from time import perf_counter
 import statistics
+from time import perf_counter
 from typing import Tuple, List, Optional
+
+from twisted.internet import defer
+from twisted.python.failure import Failure
 
 from dnsagent.app import App, init_log
 from dnsagent.resolver import HostsResolver, ExtendedResolver, TCPExtendedResolver
 from dnsagent.server import MyDNSServerFactory
-from dnsagent.socks import get_client_endpoint
-from dnsagent.utils import get_reactor
-
-from twisted.internet import defer
-from twisted.internet.endpoints import connectProtocol
-from twisted.internet.protocol import Protocol
-from twisted.python.failure import Failure
+from dnsagent.utils import get_reactor, wait_for_tcp
 
 
 init_log()
@@ -48,38 +45,6 @@ def run_server(bind: Tuple[str, int]):
     app.start((server, [bind]))
 
     reactor.run()
-
-
-def wait_for_server(addr, retries=20, timeout=0.2, d=None):
-    # TODO: merge this with dnsagent.tests.test_socks.SSRunner#wait_for_ss
-    def connected(result):
-        logger.debug('server up on %r', addr)
-        protocol.transport.loseConnection()
-        d.callback(addr)
-        return result
-
-    def failed(ignore):
-        logger.debug('dns server not started. retries left: %d', retries - 1)
-        reactor.callLater(
-            timeout, wait_for_server,
-            addr=addr, retries=(retries - 1), timeout=timeout, d=d,
-        )
-
-    reactor = get_reactor()
-    d = d or defer.Deferred()
-
-    if retries <= 0:
-        d.errback(Exception('dns server not started on %r' % addr))
-    else:
-        protocol = Protocol()
-        connect_d = connectProtocol(
-            get_client_endpoint(
-                reactor, addr, timeout=timeout),
-            protocol,
-        )
-        connect_d.addCallbacks(connected, failed)
-
-    return d
 
 
 class QueryRunner:
@@ -241,7 +206,7 @@ def run_controller(server_addr, options):
         client.start()
         queriers.append((inqueue, outqueue, client))
 
-    d = wait_for_server(server_addr)
+    d = wait_for_tcp(server_addr, logger=logger)
     d.addCallbacks(server_ready, server_failed).addBoth(teardown)
 
     reactor = get_reactor()

@@ -1,25 +1,23 @@
 from enum import IntEnum
-from ipaddress import IPv4Address, IPv6Address, ip_address
-import struct
-import socket
 from io import BytesIO
+from ipaddress import IPv4Address, IPv6Address, ip_address
 import logging
+import socket
+import struct
 from typing import NamedTuple, Union, Optional, Tuple
 
-from dnsagent.utils import get_reactor
-
-from twisted.internet.endpoints import (
-    TCP4ClientEndpoint, TCP6ClientEndpoint, HostnameEndpoint, connectProtocol,
-)
-from twisted.internet.protocol import DatagramProtocol, Protocol, connectionDone, ClientFactory
+from twisted.internet import address as taddress
+from twisted.internet import defer
+from twisted.internet.endpoints import connectProtocol
+from twisted.internet.error import MessageLengthError, CannotListenError
 from twisted.internet.interfaces import (
     IListeningPort, IUDPTransport, IReactorUDP, IReactorTCP, IConnector,
 )
-from twisted.internet.error import MessageLengthError, CannotListenError
+from twisted.internet.protocol import DatagramProtocol, Protocol, connectionDone, ClientFactory
 from twisted.python.failure import Failure
-from twisted.internet import address as taddress
-from twisted.internet import defer
 from zope.interface import implementer
+
+from dnsagent.utils import get_reactor, get_client_endpoint
 
 
 # TODO: timeout?
@@ -674,17 +672,6 @@ class Socks5ControlProtocol(Protocol):
             # insufficient data (self.data not touched) or protocol failed (self.data is b'')
             if len(self.data) == 0 or len(self.data) == data_len:
                 break
-
-
-def get_client_endpoint(reactor, addr: Tuple[str, int], **kwargs):
-    host, port = addr
-    shost = to_socks_host(host)
-    if isinstance(shost, IPv4Address):
-        return TCP4ClientEndpoint(reactor, host, port, **kwargs)
-    elif isinstance(shost, IPv6Address):
-        return TCP6ClientEndpoint(reactor, host, port, **kwargs)
-    else:
-        return HostnameEndpoint(reactor, host.encode(), port, **kwargs)
 
 
 @implementer(IReactorTCP)

@@ -1,9 +1,14 @@
+from ipaddress import IPv4Address, IPv6Address, ip_address
+import logging
 import os
-import socket
-from ipaddress import IPv4Address, IPv6Address
-from typing import NamedTuple, Tuple
 import re
+import socket
+from typing import NamedTuple, Tuple
 
+from twisted.internet import defer
+from twisted.internet.endpoints import connectProtocol, TCP4ClientEndpoint, TCP6ClientEndpoint, \
+    HostnameEndpoint
+from twisted.internet.protocol import Protocol
 from twisted.names import dns
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
 from watchdog.observers import Observer
@@ -126,3 +131,51 @@ def repr_short(obj):
         return obj._repr_short_()
     except AttributeError:
         return repr(obj)
+
+
+def wait_for_tcp(addr: Tuple[str, int], retries=20, timeout=0.2, d=None, logger=None):
+    def connected(result):
+        plogger.debug('server is up')
+        protocol.transport.loseConnection()
+        d.callback(addr)
+        return result
+
+    def failed(ignore):
+        plogger.debug('server is down. retries left: %d', retries - 1)
+        reactor.callLater(
+            timeout, wait_for_tcp,
+            addr=addr, retries=(retries - 1), timeout=timeout, d=d, logger=logger,
+        )
+
+    reactor = get_reactor()
+    d = d or defer.Deferred()
+    logger = logger or logging.getLogger(__name__)
+    plogger = PrefixedLogger(logger, 'wait_for_tcp(%r): ' % (addr,))
+
+    if retries <= 0:
+        d.errback(Exception('wait_for_tcp(%r): server not started' % addr))
+    else:
+        protocol = Protocol()
+        connect_d = connectProtocol(
+            get_client_endpoint(
+                reactor, addr, timeout=timeout),
+            protocol,
+        )
+        connect_d.addCallbacks(connected, failed)
+
+    return d
+
+
+def get_client_endpoint(reactor, addr: Tuple[str, int], **kwargs):
+    host, port = addr
+    shost = host
+    try:
+        shost = ip_address(host)
+    except ValueError:
+        pass
+    if isinstance(shost, IPv4Address):
+        return TCP4ClientEndpoint(reactor, host, port, **kwargs)
+    elif isinstance(shost, IPv6Address):
+        return TCP6ClientEndpoint(reactor, host, port, **kwargs)
+    else:
+        return HostnameEndpoint(reactor, host.encode(), port, **kwargs)

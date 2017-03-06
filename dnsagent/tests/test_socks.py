@@ -22,10 +22,9 @@ from dnsagent.socks import (
     read_socks_host, encode_socks_host, SocksHost, BadSocksHost, InsufficientData,
     Socks5Reply, BadSocks5Reply, to_twisted_addr,
     UDPRelayPacket, BadUDPRelayPacket, UDPRelayProtocol, UDPRelayTransport,
-    Socks5ControlProtocol, Socks5Cmd, UDPRelay, SocksProxy, get_client_endpoint,
-    TCPRelayConnector,
+    Socks5ControlProtocol, Socks5Cmd, UDPRelay, SocksProxy, TCPRelayConnector,
 )
-from dnsagent.utils import rrheader_to_ip, get_reactor
+from dnsagent.utils import rrheader_to_ip, get_reactor, get_client_endpoint, wait_for_tcp
 
 
 logger = logging.getLogger(__name__)
@@ -661,39 +660,9 @@ class SSRunner:
                 '-b', cls.ss_client_host, '-l', str(cls.ss_client_port), '-k', cls.ss_passwd,
             ])
 
-            cls._ss_defer = cls.wait_for_ss()
+            cls._ss_defer = wait_for_tcp((cls.ss_client_host, cls.ss_client_port))
 
         return cls._ss_defer
-
-    @classmethod
-    def wait_for_ss(cls, times=20, timeout=0.2, d=None):
-        def connected(result):
-            protocol.transport.loseConnection()
-            d.callback(None)
-            return result
-
-        def failed(ignore):
-            logger.debug('testing sslocal failed: times=%d', times)
-            reactor.callLater(
-                timeout,
-                cls.wait_for_ss, times=(times - 1), timeout=timeout, d=d,
-            )
-
-        reactor = get_reactor()
-        d = d or defer.Deferred()
-
-        if times <= 0:
-            d.errback(Exception('sslocal not started'))
-        else:
-            protocol = Protocol()
-            connect_d = connectProtocol(
-                get_client_endpoint(
-                    reactor, (cls.ss_client_host, cls.ss_client_port), timeout=timeout),
-                protocol,
-            )
-            connect_d.addCallbacks(connected, failed)
-
-        return d
 
     @classmethod
     def shutdown(cls):
