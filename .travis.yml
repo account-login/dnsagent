@@ -17,3 +17,8 @@ install:
 script:
   - pytest -s --verbose --cov=dnsagent dnsagent/tests/
   - codecov
+
+after_success:
+  - python -m dnsagent.scripts.benchmark --process 1
+  - python -m dnsagent.scripts.benchmark --process 2
+  - python -m dnsagent.scripts.benchmark --process 3
