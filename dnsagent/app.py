@@ -71,7 +71,7 @@ class App:
     def stop(self):
         return defer.DeferredList([
             defer.maybeDeferred(port.stopListening) for port in self.ports
-        ])
+        ], fireOnOneErrback=True)
 
 
 class ConfigLoader:

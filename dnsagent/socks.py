@@ -379,7 +379,7 @@ class UDPRelay:
                 dl.append(defer.maybeDeferred(self.listening_port.stopListening))
             if self.relay_proto.transport is not None:
                 dl.append(defer.maybeDeferred(self.relay_proto.transport.stopListening))
-            self._stop_defer = defer.DeferredList(dl)
+            self._stop_defer = defer.DeferredList(dl, fireOnOneErrback=True)
         return self._stop_defer
 
 

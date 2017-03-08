@@ -545,7 +545,7 @@ class FakeSocks5ControlServerProtocol(Protocol):
             dl.append(defer.maybeDeferred(self.udp_relay_server_port.stopListening))
         if self.tcp_relay_proto and self.tcp_relay_proto.transport:
             dl.append(defer.maybeDeferred(self.tcp_relay_proto.transport.loseConnection))
-        return defer.DeferredList(dl)
+        return defer.DeferredList(dl, fireOnOneErrback=True)
 
 
 # noinspection PyAttributeOutsideInit
@@ -634,7 +634,7 @@ class TestUDPRelayWithFakeServer(BaseTestUDPRelayIntegrated):
             defer.maybeDeferred(self.server_ctrl_port.stopListening),
             server_ctrl_proto.stop(),
         ]
-        return defer.DeferredList(dl)
+        return defer.DeferredList(dl, fireOnOneErrback=True)
 
 
 class SSRunner:
@@ -711,7 +711,7 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
         return defer.DeferredList([
             super().tearDown(),
             defer.maybeDeferred(self.reverser_transport.stopListening)
-        ])
+        ], fireOnOneErrback=True)
 
 
 # noinspection PyAttributeOutsideInit
@@ -950,13 +950,13 @@ class BaseTestTCPRelayConnectorIntegrated(unittest.TestCase):
         return defer.DeferredList([
             self.setup_service(),
             self.setup_server(),
-        ])
+        ], fireOnOneErrback=True)
 
     def tearDown(self):
         return defer.DeferredList([
             defer.maybeDeferred(self.teardown_service),
             defer.maybeDeferred(self.teardown_server),
-        ])
+        ], fireOnOneErrback=True)
 
     def _listen_protocol(self, protocol: Protocol, host: str, port: int, name: str):
         def got_transport(transport):
@@ -977,7 +977,7 @@ class BaseTestTCPRelayConnectorIntegrated(unittest.TestCase):
         return defer.DeferredList([
             defer.maybeDeferred(self.service_transport.stopListening),
             defer.maybeDeferred(self.service_proto.transport.loseConnection)
-        ])
+        ], fireOnOneErrback=True)
 
     def setup_server(self):
         raise NotImplementedError
