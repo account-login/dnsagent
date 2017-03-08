@@ -153,7 +153,7 @@ def wait_for_tcp(addr: Tuple[str, int], retries=20, timeout=0.2, d=None, logger=
     plogger = PrefixedLogger(logger, 'wait_for_tcp(%r): ' % (addr,))
 
     if retries <= 0:
-        d.errback(Exception('wait_for_tcp(%r): server not started' % addr))
+        d.errback(Exception('wait_for_tcp(%r): server not started' % (addr,)))
     else:
         protocol = Protocol()
         connect_d = connectProtocol(
