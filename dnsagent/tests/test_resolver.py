@@ -4,19 +4,24 @@ from ipaddress import IPv4Address
 from typing import Sequence
 
 from twisted.internet import task, defer
+from twisted.internet.error import ConnectionDone
 from twisted.names import dns
 from twisted.names.error import ResolverError
+from twisted.python.failure import Failure
 
+from dnsagent.app import App
 from dnsagent.config import hosts
 from dnsagent.resolver import (
     HostsResolver, CachingResolver, ParallelResolver, CnResolver, DualResolver,
+    TCPExtendedResolver,
 )
 from dnsagent.resolver.hosts import parse_hosts_file
 from dnsagent.resolver.cn import MayBePolluted
 from dnsagent.resolver.parallel import (
     PoliciedParallelResolver, BaseParalledResolverPolicy,
 )
-from dnsagent.utils import rrheader_to_ip
+from dnsagent.server import MyDNSServerFactory
+from dnsagent.utils import rrheader_to_ip, get_reactor
 from dnsagent.tests import iplist, FakeResolver, BaseTestResolver
 
 
@@ -289,6 +294,92 @@ class TestDualResovler(BaseTestResolver):
             locals()['test_%s_%s_%r' % (cn, ab, order)] = make_test(cn, ab, expected, order)
 
     del make_test
+
+
+class LoseConnectionDNSServerFactory(MyDNSServerFactory):
+    countdown = 100
+
+    def sendReply(self, protocol, message, address):
+        self.countdown -= 1
+        if self.countdown <= 0:
+            protocol.transport.loseConnection()
+        else:
+            super().sendReply(protocol, message, address)
+
+
+class TestTCPExtendedResolver(BaseTestResolver):
+    server_addr = ('127.0.0.53', 5353)
+
+    def setUp(self):
+        super().setUp()
+        self.fake_resolver = FakeResolver()
+        self.fake_resolver.set_answer('asdf', '1.2.3.4')
+        self.fake_resolver.set_answer('fdsa', '4.3.2.1')
+        self.fake_resolver.delay = 0.01
+
+        self.server = LoseConnectionDNSServerFactory(resolver=self.fake_resolver)
+        self.app = App()
+        self.app.start((self.server, [self.server_addr]))
+
+        self.resolver = TCPExtendedResolver(servers=[self.server_addr])
+        self.reactor = get_reactor()
+
+    def tearDown(self):
+        def super_down(ignore):
+            self.app.stop().chainDeferred(d)
+
+        d = defer.Deferred()
+        super().tearDown().addBoth(super_down)
+        return d
+
+    def test_success(self):
+        def check_waiting_state():
+            assert not self.resolver.pending
+            assert len(self.resolver.tcp_waiting) == 2
+
+        def check_finished_state(ignore):
+            assert not self.resolver.pending
+            assert not self.resolver.tcp_waiting
+            self.reactor.callLater(0.001,
+                lambda: defer.maybeDeferred(check_disconnected)
+                    .chainDeferred(final_d))
+
+        def check_disconnected():
+            assert not self.resolver.tcp_protocol
+
+        final_d = defer.Deferred()
+        query_d = defer.DeferredList([
+            self.check_a('asdf', iplist('1.2.3.4')),
+            self.check_a('fdsa', iplist('4.3.2.1')),
+        ], fireOnOneErrback=True)
+        query_d.addCallback(check_finished_state)
+        query_d.addErrback(final_d.errback)
+
+        self.reactor.callLater(0.005,
+            lambda: defer.maybeDeferred(check_waiting_state)
+                .addErrback(final_d.errback))
+
+        return final_d
+
+    def test_connection_lost(self):
+        self.server.countdown = 2
+
+        self.check_a('asdf', iplist('1.2.3.4'))
+        self.check_a('fdsa', fail=ConnectionDone)
+
+        return self.tearDown()
+
+    def test_connection_failed_reconnect(self):
+        class MyException(Exception):
+            pass
+
+        self.check_a('asdf', fail=MyException)
+        self.resolver.factory.clientConnectionFailed(None, Failure(MyException('asdf')))
+
+        # reconnect
+        self.check_a('fdsa', iplist('4.3.2.1'))
+
+        return self.tearDown()
 
 
 del BaseTestResolver

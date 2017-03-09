@@ -79,11 +79,11 @@ def make_rrheader(name: str, address: str, ttl=60):
 
 class BaseTestResolver(unittest.TestCase):
     def setUp(self):
-        self.defereds = []
+        self.deferreds = []
         self.resolver = None
 
     def tearDown(self):
-        return defer.DeferredList(self.defereds, fireOnOneErrback=True)
+        return defer.DeferredList(self.deferreds, fireOnOneErrback=True)
 
     def _check_query(self, query: dns.Query, expect=None, fail=None):
         if fail:
@@ -106,7 +106,7 @@ class BaseTestResolver(unittest.TestCase):
 
         d = self.resolver.query(query, timeout=[0.5])
         d.addCallbacks(check_result, failed)
-        self.defereds.append(d)
+        self.deferreds.append(d)
         return d
 
     def check_a(self, name: str, expect=None, fail=None):
