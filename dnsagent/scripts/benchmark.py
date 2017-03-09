@@ -3,6 +3,7 @@ from ipaddress import ip_address
 from itertools import chain
 import logging
 from multiprocessing import Process, Queue
+import os
 import statistics
 from time import perf_counter
 from typing import Tuple, List, Optional
@@ -17,9 +18,16 @@ from dnsagent.utils import get_reactor, wait_for_tcp
 
 
 init_log()
-logging.getLogger().setLevel(logging.ERROR)
+
+# set log level for root logger
+if os.environ.get('DEBUG'):
+    logging.getLogger().setLevel(logging.DEBUG)
+else:
+    logging.getLogger().setLevel(logging.ERROR)
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
 
 DEFAULT_SERVER_ADDR = ('127.0.1.88', 5353)
 _server_process = None
