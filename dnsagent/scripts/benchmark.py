@@ -29,6 +29,15 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
+# use IOCP reactor if available to workaround descriptor limit
+try:
+    import twisted.internet.iocpreactor
+except ImportError:
+    pass
+else:
+    twisted.internet.iocpreactor.install()
+
+
 DEFAULT_SERVER_ADDR = ('127.0.1.88', 5353)
 _server_process = None
 
