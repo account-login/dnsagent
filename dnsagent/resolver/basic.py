@@ -209,7 +209,11 @@ class ExtendedResolver(BaseResolver):
         pending = copy_and_clear(self.pending)
         logger.debug('resolve %d pending queries: %s', len(pending), reprlib.repr(pending))
         for d, queries, timeout in pending:
-            self.queryTCP(queries, timeout=timeout).chainDeferred(d)
+            requery_d = self.queryTCP(queries, timeout=timeout)
+            requery_d.chainDeferred(d)
+            # requery_d is duplicated
+            # since deferreds from self.pending is moving to self.tcp_waiting.
+            self.tcp_waiting.discard(requery_d)
             self.tcp_waiting.add(d)
 
     def connectionLost(self, protocol: MyDNSProtocol):
