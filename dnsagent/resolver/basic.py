@@ -1,12 +1,13 @@
 import logging
 import reprlib
+import struct
 from typing import Union, Set, List, Dict
 
 from twisted.internet import defer
 from twisted.internet.protocol import ClientFactory
 from twisted.internet import tcp
 from twisted.names.client import Resolver as OriginResolver
-from twisted.names.dns import DNSDatagramProtocol, DNSProtocol
+from twisted.names.dns import DNSDatagramProtocol, DNSProtocol, Message
 
 from dnsagent.resolver.base import patch_resolver
 from dnsagent.socks import SocksProxy, UDPRelay, TCPRelayConnector
@@ -57,7 +58,9 @@ class MyDNSProtocol(DNSProtocol):
     """
     DNS protocol over TCP.
     
-    Fixes a bug that self.liveMessages not handled when connection lost.
+    Fixed bugs:
+        1. self.liveMessages not handled when connection lost.
+        2. dataReceived() fails on len(self.buffer) < 2
     """
     def connectionLost(self, reason):
         """
@@ -75,6 +78,39 @@ class MyDNSProtocol(DNSProtocol):
         for d, canceller in live_msg.values():
             d.errback(reason)
             canceller.cancel()
+
+    def dataReceived(self, data):
+        """Bug fixed"""
+        self.buffer += data
+
+        while self.buffer:
+            if self.length is None and len(self.buffer) >= 2:
+                self.length = struct.unpack('!H', self.buffer[:2])[0]
+                self.buffer = self.buffer[2:]
+
+            # FIXED: self.length may be None
+            if self.length is not None and len(self.buffer) >= self.length:
+                myChunk = self.buffer[:self.length]
+                m = Message()
+                m.fromStr(myChunk)
+
+                try:
+                    d, canceller = self.liveMessages[m.id]
+                except KeyError:
+                    self.controller.messageReceived(m, self)
+                else:
+                    del self.liveMessages[m.id]
+                    canceller.cancel()
+                    # XXX: we shouldn't need this hack
+                    try:
+                        d.callback(m)
+                    except:
+                        logger.exception('exceptions in callback query result')
+
+                self.buffer = self.buffer[self.length:]
+                self.length = None
+            else:
+                break
 
 
 class MyDNSClientFactory(ClientFactory):
