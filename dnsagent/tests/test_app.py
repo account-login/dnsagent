@@ -65,13 +65,13 @@ class TestApp(BaseTestResolver):
 
     def tearDown(self):
         d = defer.Deferred()
-        super().tearDown().addBoth(lambda ignore: self.clean_apps(d))
+        super().tearDown().addCallbacks(lambda ignore: self.clean_apps(d), d.errback)
         return d
 
     def clean_apps(self, final: defer.Deferred):
         return defer.DeferredList(
-            [ app.stop() for app in self.apps ]
-        ).addBoth(lambda ignore: final.callback(None))
+            [ app.stop() for app in self.apps ], fireOnOneErrback=True,
+        ).chainDeferred(final)
 
     def set_resolver(self, resolver):
         server = MyDNSServerFactory(resolver=resolver)

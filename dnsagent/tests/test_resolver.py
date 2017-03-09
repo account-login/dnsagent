@@ -329,7 +329,7 @@ class TestTCPExtendedResolver(BaseTestResolver):
             self.app.stop().chainDeferred(d)
 
         d = defer.Deferred()
-        super().tearDown().addBoth(super_down)
+        super().tearDown().addCallbacks(super_down, d.errback)
         return d
 
     def test_success(self):
@@ -367,8 +367,6 @@ class TestTCPExtendedResolver(BaseTestResolver):
         self.check_a('asdf', iplist('1.2.3.4'))
         self.check_a('fdsa', fail=ConnectionDone)
 
-        return self.tearDown()
-
     def test_connection_failed_reconnect(self):
         class MyException(Exception):
             pass
@@ -378,8 +376,6 @@ class TestTCPExtendedResolver(BaseTestResolver):
 
         # reconnect
         self.check_a('fdsa', iplist('4.3.2.1'))
-
-        return self.tearDown()
 
 
 del BaseTestResolver
