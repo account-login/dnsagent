@@ -184,6 +184,10 @@ def process_results(results: List[RunQueryResultType], options):
         value = locals()[name]
         print('{name}: {value}'.format_map(locals()))
 
+    if options.stats_file:
+        with open(options.stats_file, 'wt+') as fp:
+            fp.writelines('%s\n' % t for t in query_times)
+
     # TODO: print bar chart of query time
 
 
@@ -266,6 +270,8 @@ def parse_args():
         '--no-reuse-resolver', default=False, action='store_true',
         help='use a new resolver for every query',
     )
+
+    parser.add_argument('--stats-file', help='write query times to this file')
 
     return parser.parse_args()
 
