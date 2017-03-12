@@ -15,6 +15,7 @@ from dnsagent.resolver import (
     HostsResolver, CachingResolver, ParallelResolver, CnResolver, DualResolver,
     TCPExtendedResolver,
 )
+from dnsagent.resolver.basic import BugFixResolver
 from dnsagent.resolver.hosts import parse_hosts_file
 from dnsagent.resolver.cn import MayBePolluted
 from dnsagent.resolver.parallel import (
@@ -307,7 +308,12 @@ class LoseConnectionDNSServerFactory(MyDNSServerFactory):
             super().sendReply(protocol, message, address)
 
 
-class TestTCPExtendedResolver(BaseTestResolver):
+class TCPOnlyBugFixResolver(BugFixResolver):
+    def queryUDP(self, queries, timeout=None):
+        return self.queryTCP(queries)
+
+
+class TestTCPBugFixResolver(BaseTestResolver):
     server_addr = ('127.0.0.53', 5353)
 
     def setUp(self):
@@ -321,7 +327,7 @@ class TestTCPExtendedResolver(BaseTestResolver):
         self.app = App()
         self.app.start((self.server, [self.server_addr]))
 
-        self.resolver = TCPExtendedResolver(servers=[self.server_addr])
+        self.resolver = TCPOnlyBugFixResolver(servers=[self.server_addr])
         self.reactor = get_reactor()
 
     def tearDown(self):

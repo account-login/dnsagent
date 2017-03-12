@@ -116,7 +116,7 @@ class MyDNSProtocol(DNSProtocol):
 class MyDNSClientFactory(ClientFactory):
     protocol = MyDNSProtocol
 
-    def __init__(self, controller: 'ExtendedResolver'):
+    def __init__(self, controller: 'BugFixResolver'):
         self.controller = controller
 
     def clientConnectionLost(self, connector, reason):
@@ -154,49 +154,22 @@ class MyDNSClientFactory(ClientFactory):
         return p
 
 
-class ExtendedResolver(BaseResolver):
+class BugFixResolver(BaseResolver):
     """
-    A resolver that supports SOCKS5 proxy.
-    
     Some TCP related bugs in OriginResolver is fixed:
         1. TCP connection not closed.
         2. Bad TCP connection reuse logic.
         3. Connection lost not handled.
     """
-    def __init__(
-            self, resolv=None, servers=None, timeout=(1, 3, 11, 45), reactor=None,
-            socks_proxy: SocksProxy = None
-    ):
+    def __init__(self, resolv=None, servers=None, timeout=(1, 3, 11, 45), reactor=None):
         super().__init__(resolv=resolv, servers=servers, timeout=timeout, reactor=reactor)
         # override attributes in super().__init__()
         self.factory = MyDNSClientFactory(self)
         del self.connections
 
-        self.socks_proxy = socks_proxy
         self.tcp_connector = None   # type: Union[tcp.Connector, TCPRelayConnector]
         self.tcp_protocol = None    # type: MyDNSProtocol
         self.tcp_waiting = set()    # type: Set[defer.Deferred]
-
-    def _got_udp_relay(self, relay: UDPRelay, query_d, *query_args):
-        def stop_relay(ignore):
-            relay.stop()
-            return ignore
-
-        proto = DNSDatagramProtocolOverSocks(self, reactor=self._reactor, relay=relay)
-        relay.listenUDP(0, proto, maxPacketSize=512)
-
-        proto.query(*query_args).chainDeferred(query_d)
-        query_d.addBoth(stop_relay)
-
-    def _query(self, *args):
-        if self.socks_proxy is not None:
-            d = defer.Deferred()
-            relay_d = self.socks_proxy.get_udp_relay()
-            relay_d.addCallback(self._got_udp_relay, d, *args)
-            relay_d.addErrback(d.errback)
-            return d
-        else:
-            return super()._query(*args)
 
     def connectionMade(self, protocol: MyDNSProtocol):
         """
@@ -244,10 +217,7 @@ class ExtendedResolver(BaseResolver):
 
             # set up TCP connection
             if self.tcp_connector is None:
-                if self.socks_proxy:
-                    self.tcp_connector = self.socks_proxy.connectTCP(host, port, self.factory)
-                else:
-                    self.tcp_connector = self._reactor.connectTCP(host, port, self.factory)
+                self.tcp_connector = self.connect_tcp(host, port, self.factory)
             # reconnecting
             if self.tcp_connector.state == 'disconnected':  # XXX: private attribute
                 self.tcp_connector.connect()
@@ -262,6 +232,9 @@ class ExtendedResolver(BaseResolver):
             self.tcp_waiting.add(d)
             return d
 
+    def connect_tcp(self, host: str, port: int, factory: ClientFactory):
+        return self._reactor.connectTCP(host, port, factory)
+
     def _tcp_query_finished(self, ignore, d: defer.Deferred):
         """
         Remove finished TCP query from self.tcp_waiting, 
@@ -273,6 +246,45 @@ class ExtendedResolver(BaseResolver):
             logger.debug('no waiting queries, disconnect TCP connection.')
             self.tcp_connector.disconnect()     # may be already disconnected
         return ignore
+
+
+class ExtendedResolver(BugFixResolver):
+    """A resolver that supports SOCKS5 proxy."""
+
+    def __init__(
+            self, resolv=None, servers=None, timeout=(1, 3, 11, 45), reactor=None,
+            socks_proxy: SocksProxy = None
+    ):
+        super().__init__(resolv=resolv, servers=servers, timeout=timeout, reactor=reactor)
+        self.socks_proxy = socks_proxy
+
+    def _got_udp_relay(self, relay: UDPRelay, query_d, *query_args):
+        def stop_relay(ignore):
+            relay.stop()
+            return ignore
+
+        proto = DNSDatagramProtocolOverSocks(self, reactor=self._reactor, relay=relay)
+        relay.listenUDP(0, proto, maxPacketSize=512)
+
+        proto.query(*query_args).chainDeferred(query_d)
+        query_d.addBoth(stop_relay)
+
+    def _query(self, *args):
+        """Run UDP query"""
+        if self.socks_proxy is not None:
+            d = defer.Deferred()
+            relay_d = self.socks_proxy.get_udp_relay()
+            relay_d.addCallback(self._got_udp_relay, d, *args)
+            relay_d.addErrback(d.errback)
+            return d
+        else:
+            return super()._query(*args)
+
+    def connect_tcp(self, host: str, port: int, factory: ClientFactory):
+        if self.socks_proxy:
+            return self.socks_proxy.connectTCP(host, port, self.factory)
+        else:
+            return super().connect_tcp(host, port, factory)
 
 
 class TCPExtendedResolver(ExtendedResolver):
