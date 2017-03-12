@@ -88,10 +88,10 @@ def test_socks5_reply_load():
     def R(data: bytes, reply: int, host: SocksHost, port: int):
         assert Socks5Reply.load(BytesIO(data)) == Socks5Reply(reply, host, port)
 
-    data = b'\5\1\0\1\x7f\0\0\1\x12\x34'
-    for i in range(len(data) - 1):
-        E(data[:i], InsufficientData)
-    R(data, 1, ip_address('127.0.0.1'), 0x1234)
+    reply_data = b'\5\1\0\1\x7f\0\0\1\x12\x34'
+    for i in range(len(reply_data) - 1):
+        E(reply_data[:i], InsufficientData)
+    R(reply_data, 1, ip_address('127.0.0.1'), 0x1234)
 
     E(b'\4\0\0\1\x7f\0\0\1\x12\x34', BadSocks5Reply)
     E(b'\5\0\1\1\x7f\0\0\1\x12\x34', BadSocks5Reply)
@@ -722,6 +722,7 @@ class TestGetUDPRelayWithSS(TestUDPRelayWithSS):
         self.relay_done.addCallback(lambda relay: setattr(self, 'relay', relay))
 
 
+# noinspection PyAttributeOutsideInit
 class TestResolverOverSocks(TestUDPRelayWithSS):
     def setup_resolver(self, resolver_cls: type):
         self.resolver = resolver_cls(
@@ -810,6 +811,7 @@ class ReconnectingFakeClientFactory(FakeClientFactory):
         connector.connect()
 
 
+# noinspection PyAttributeOutsideInit
 class TestTCPRelayConnector(unittest.TestCase):
     def setUp(self):
         self.factory = FakeClientFactory()
