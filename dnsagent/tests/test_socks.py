@@ -1,30 +1,37 @@
+import logging
 import struct
 import subprocess
 from io import BytesIO
 from ipaddress import ip_address
-import logging
 
 import psutil
 import pytest
-from twisted.trial import unittest
-from twisted.python.failure import Failure
-from twisted.internet import defer
 from twisted.internet import address as taddress
+from twisted.internet import defer
+from twisted.internet.endpoints import TCP4ClientEndpoint, TCP4ServerEndpoint, connectProtocol
 from twisted.internet.error import CannotListenError
 from twisted.internet.protocol import (
     DatagramProtocol, Protocol, ServerFactory, connectionDone, ClientFactory,
 )
-from twisted.internet.endpoints import TCP4ClientEndpoint, TCP4ServerEndpoint, connectProtocol
+from twisted.python.failure import Failure
+from twisted.trial import unittest
 
 from dnsagent.app import App
 from dnsagent.resolver.basic import ExtendedResolver, TCPExtendedResolver
 from dnsagent.socks import (
     read_socks_host, encode_socks_host, SocksHost, BadSocksHost, InsufficientData,
-    Socks5Reply, BadSocks5Reply, to_twisted_addr,
-    UDPRelayPacket, BadUDPRelayPacket, UDPRelayProtocol, UDPRelayTransport,
-    Socks5ControlProtocol, Socks5Cmd, UDPRelay, SocksProxy, TCPRelayConnector,
+    Socks5Reply, BadSocks5Reply,
+    UDPRelayPacket, BadUDPRelayPacket, UDPRelayProtocol, UDPRelayTransport, UDPRelay,
+    Socks5ControlProtocol, Socks5Cmd, SocksProxy, TCPRelayConnector,
 )
-from dnsagent.utils import rrheader_to_ip, get_reactor, get_client_endpoint, wait_for_tcp
+from dnsagent.tests import (
+    FakeTransport, FakeDatagramProtocol, FakeProtocol,
+    OneshotClientFactory, OneshotServerFactory,
+    Greeter, TCPGreeter, Reverser, TCPReverser,
+)
+from dnsagent.utils import (
+    rrheader_to_ip, get_reactor, get_client_endpoint, wait_for_tcp, to_twisted_addr,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -104,60 +111,6 @@ def test_socks5_reply_dumps():
 
     R(0, 'asdf', 0x1234, b'\5\0\0\3\4asdf\x12\x34')
     R(1, ip_address('1.2.3.4'), 0x1234, b'\5\1\0\1\1\2\3\4\x12\x34')
-
-
-class FakeTransport:
-    def __init__(self, addr=('8.7.6.5', 8765)):
-        self.write_logs = []
-        self.connected = True
-        self.addr = addr
-
-    def write(self, data, addr=None):
-        self.write_logs.append((data, addr))
-
-    def loseConnection(self):
-        assert self.connected
-        self.connected = False
-
-    stopListening = loseConnection
-
-    def getHost(self):
-        return to_twisted_addr(*self.addr, type_='TCP')
-
-    def poplogs(self):
-        logs = self.write_logs
-        self.write_logs = []
-        return logs
-
-
-class FakeDatagramProtocol(DatagramProtocol):
-    start_count = 0
-    stop_count = 0
-
-    def __init__(self):
-        self.data_logs = []
-
-    def datagramReceived(self, datagram: bytes, addr):
-        self.data_logs.append((datagram, addr))
-
-    def startProtocol(self):
-        self.start_count += 1
-
-    def stopProtocol(self):
-        self.stop_count += 1
-
-
-class FakeProtocol(Protocol):
-    lost = False
-
-    def __init__(self):
-        self.recv_logs = []
-
-    def dataReceived(self, data):
-        self.recv_logs.append(data)
-
-    def connectionLost(self, reason=connectionDone):
-        self.lost = True
 
 
 def test_udp_relay_protocol():
@@ -1020,59 +973,6 @@ class TestTCPRelayConnectorWithSS(BaseTestTCPRelayConnectorIntegrated):
 
     def teardown_server(self):
         pass
-
-
-class Reverser(DatagramProtocol):
-    def datagramReceived(self, datagram, addr):
-        data = bytes(reversed(datagram))
-        self.transport.write(data, addr)
-
-
-class TCPReverser(Protocol):
-    def dataReceived(self, data):
-        data = bytes(reversed(data))
-        self.transport.write(data)
-
-
-class OneshotServerFactory(ServerFactory):
-    def __init__(self, protocol: Protocol):
-        self.proto = protocol
-
-    def buildProtocol(self, addr):
-        return self.proto
-
-
-class Greeter(DatagramProtocol):
-    def __init__(self, dest_addr):
-        self.dest_addr = dest_addr
-        self.d = defer.Deferred()
-
-    def startProtocol(self):
-        self.transport.connect(*self.dest_addr)
-        self.transport.write(b'hello')
-
-    def datagramReceived(self, datagram, addr):
-        self.d.callback(datagram)
-
-
-class TCPGreeter(Protocol):
-    def __init__(self):
-        self.d = defer.Deferred()
-
-    def connectionMade(self):
-        self.transport.write(b'hello')
-
-    def dataReceived(self, data):
-        self.d.callback(data)
-
-
-class OneshotClientFactory(ClientFactory):
-    def __init__(self, protocol: Protocol):
-        self.proto = protocol
-
-    def buildProtocol(self, addr):
-        self.proto.factory = self
-        return self.proto
 
 
 def tearDownModule():

@@ -5,9 +5,10 @@ import re
 import socket
 from typing import NamedTuple, Tuple
 
-from twisted.internet import defer
-from twisted.internet.endpoints import connectProtocol, TCP4ClientEndpoint, TCP6ClientEndpoint, \
-    HostnameEndpoint
+from twisted.internet import defer, address as taddress
+from twisted.internet.endpoints import (
+    connectProtocol, TCP4ClientEndpoint, TCP6ClientEndpoint, HostnameEndpoint,
+)
 from twisted.internet.protocol import Protocol
 from twisted.names import dns
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
@@ -179,3 +180,17 @@ def get_client_endpoint(reactor, addr: Tuple[str, int], **kwargs):
         return TCP6ClientEndpoint(reactor, host, port, **kwargs)
     else:
         return HostnameEndpoint(reactor, host.encode(), port, **kwargs)
+
+
+def to_twisted_addr(host: str, port: int, type_='TCP'):
+    try:
+        host = ip_address(host)
+    except ValueError:
+        pass
+    if isinstance(host, IPv4Address):
+        return taddress.IPv4Address(type_, str(host), port)
+    elif isinstance(host, IPv6Address):
+        return taddress.IPv6Address(type_, str(host), port)
+    else:
+        assert isinstance(host, str)
+        return taddress.HostnameAddress(host.encode(), port)

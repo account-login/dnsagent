@@ -1,12 +1,11 @@
-from enum import IntEnum
-from io import BytesIO
-from ipaddress import IPv4Address, IPv6Address, ip_address
 import logging
 import socket
 import struct
+from enum import IntEnum
+from io import BytesIO
+from ipaddress import IPv4Address, IPv6Address, ip_address
 from typing import NamedTuple, Union, Optional, Tuple
 
-from twisted.internet import address as taddress
 from twisted.internet import defer
 from twisted.internet.endpoints import connectProtocol
 from twisted.internet.error import MessageLengthError, CannotListenError
@@ -17,7 +16,7 @@ from twisted.internet.protocol import DatagramProtocol, Protocol, connectionDone
 from twisted.python.failure import Failure
 from zope.interface import implementer
 
-from dnsagent.utils import get_reactor, get_client_endpoint
+from dnsagent.utils import get_reactor, get_client_endpoint, to_twisted_addr
 
 
 # TODO: timeout?
@@ -34,17 +33,6 @@ def to_socks_host(host: str) -> SocksHost:
         return ip_address(host)
     except ValueError:
         return host
-
-
-def to_twisted_addr(host: str, port: int, type_='TCP'):
-    host = to_socks_host(host)
-    if isinstance(host, IPv4Address):
-        return taddress.IPv4Address(type_, str(host), port)
-    elif isinstance(host, IPv6Address):
-        return taddress.IPv6Address(type_, str(host), port)
-    else:
-        assert isinstance(host, str)
-        return taddress.HostnameAddress(host.encode(), port)
 
 
 class BadSocksHost(Exception):

@@ -1,14 +1,17 @@
 from ipaddress import ip_address, IPv4Address, IPv6Address
-from typing import Tuple, Sequence
 import logging
+from typing import Tuple, Sequence
 
+from twisted.internet.protocol import (
+    DatagramProtocol, Protocol, connectionDone, ServerFactory, ClientFactory,
+)
 from twisted.internet import defer
 from twisted.names import dns
 from twisted.python.failure import Failure
 from twisted.trial import unittest
 
 from dnsagent.app import init_log, enable_log
-from dnsagent.utils import rrheader_to_ip, get_reactor
+from dnsagent.utils import rrheader_to_ip, get_reactor, to_twisted_addr
 from dnsagent.resolver.base import MyResolverBase
 
 
@@ -126,3 +129,110 @@ class BaseTestResolver(unittest.TestCase):
             dns.Query(name.encode('utf8'), dns.ALL_RECORDS, dns.IN),
             expect=expect, fail=fail,
         )
+
+
+class FakeTransport:
+    def __init__(self, addr=('8.7.6.5', 8765)):
+        self.write_logs = []
+        self.connected = True
+        self.addr = addr
+
+    def write(self, data, addr=None):
+        self.write_logs.append((data, addr))
+
+    def loseConnection(self):
+        assert self.connected
+        self.connected = False
+
+    stopListening = loseConnection
+
+    def getHost(self):
+        return to_twisted_addr(*self.addr, type_='TCP')
+
+    def poplogs(self):
+        logs = self.write_logs
+        self.write_logs = []
+        return logs
+
+
+class FakeDatagramProtocol(DatagramProtocol):
+    start_count = 0
+    stop_count = 0
+
+    def __init__(self):
+        self.data_logs = []
+
+    def datagramReceived(self, datagram: bytes, addr):
+        self.data_logs.append((datagram, addr))
+
+    def startProtocol(self):
+        self.start_count += 1
+
+    def stopProtocol(self):
+        self.stop_count += 1
+
+
+class FakeProtocol(Protocol):
+    lost = False
+
+    def __init__(self):
+        self.recv_logs = []
+
+    def dataReceived(self, data):
+        self.recv_logs.append(data)
+
+    def connectionLost(self, reason=connectionDone):
+        self.lost = True
+
+
+class Reverser(DatagramProtocol):
+    def datagramReceived(self, datagram, addr):
+        data = bytes(reversed(datagram))
+        self.transport.write(data, addr)
+
+
+class TCPReverser(Protocol):
+    def dataReceived(self, data):
+        data = bytes(reversed(data))
+        self.transport.write(data)
+
+
+class Greeter(DatagramProtocol):
+    def __init__(self, dest_addr):
+        self.dest_addr = dest_addr
+        self.d = defer.Deferred()
+
+    def startProtocol(self):
+        self.transport.connect(*self.dest_addr)
+        self.transport.write(b'hello')
+
+    def datagramReceived(self, datagram, addr):
+        self.d.callback(datagram)
+
+
+class TCPGreeter(Protocol):
+    def __init__(self):
+        self.d = defer.Deferred()
+
+    def connectionMade(self):
+        self.transport.write(b'hello')
+
+    def dataReceived(self, data):
+        self.d.callback(data)
+
+
+class OneshotClientFactory(ClientFactory):
+    def __init__(self, protocol: Protocol):
+        self.proto = protocol
+
+    def buildProtocol(self, addr):
+        self.proto.factory = self
+        return self.proto
+
+
+class OneshotServerFactory(ServerFactory):
+    def __init__(self, protocol: Protocol):
+        self.proto = protocol
+
+    def buildProtocol(self, addr):
+        return self.proto
