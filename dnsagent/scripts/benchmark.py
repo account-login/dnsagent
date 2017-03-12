@@ -138,8 +138,8 @@ class QueryRunner:
 RunQueryResultType = Tuple[float, List[Optional[float]]]
 
 
-def run_query(server_addr, inqueue: Queue, outqueue: Queue):
-    addr, options = inqueue.get()
+def run_query(inqueue: Queue, outqueue: Queue):
+    server_addr, options = inqueue.get()
     logger.info('run_query() begins')
 
     def got_result(result: List[Optional[float]]):
@@ -223,7 +223,7 @@ def run_controller(server_addr, options):
     queriers = []   # type: List[Tuple[Queue, Queue, Process]]
     for n in range(options.process):
         inqueue, outqueue = Queue(), Queue()
-        client = Process(target=run_query, args=(server_addr, inqueue, outqueue))
+        client = Process(target=run_query, args=(inqueue, outqueue))
         client.start()
         queriers.append((inqueue, outqueue, client))
 
