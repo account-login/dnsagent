@@ -59,6 +59,8 @@ class TestParseDnsServerString(BaseTestParseURL):
 
 
 class TestApp(BaseTestResolver):
+    server_addr = ('127.0.2.2', 5300)
+
     def setUp(self):
         super().setUp()
         self.apps = []
@@ -77,17 +79,8 @@ class TestApp(BaseTestResolver):
         server = MyDNSServerFactory(resolver=resolver)
         app = App()
         self.apps.append(app)
-        for i in range(10):
-            port = random.randrange(1024, 60000)
-            try:
-                app.start((server, [('', port)]))
-            except CannotListenError:
-                pass
-            else:
-                self.resolver = ExtendedResolver(servers=[('127.0.0.1', port)])
-                return app
-
-        self.fail('set_resolver() failed.')
+        app.start((server, [self.server_addr]))
+        self.resolver = ExtendedResolver(servers=[self.server_addr])
 
     def test_basic(self):
         fake_resolver = FakeResolver()
