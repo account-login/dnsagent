@@ -54,7 +54,7 @@ def copy_and_clear(container: Union[List, Set, Dict]):
         container.clear()
 
 
-class MyDNSProtocol(DNSProtocol):
+class BugFixDNSProtocol(DNSProtocol):
     """
     DNS protocol over TCP.
     
@@ -113,8 +113,8 @@ class MyDNSProtocol(DNSProtocol):
                 break
 
 
-class MyDNSClientFactory(ClientFactory):
-    protocol = MyDNSProtocol
+class BugFixDNSClientFactory(ClientFactory):
+    protocol = BugFixDNSProtocol
 
     def __init__(self, controller: 'BugFixResolver'):
         self.controller = controller
@@ -164,14 +164,14 @@ class BugFixResolver(BaseResolver):
     def __init__(self, resolv=None, servers=None, timeout=(1, 3, 11, 45), reactor=None):
         super().__init__(resolv=resolv, servers=servers, timeout=timeout, reactor=reactor)
         # override attributes in super().__init__()
-        self.factory = MyDNSClientFactory(self)
+        self.factory = BugFixDNSClientFactory(self)
         del self.connections
 
         self.tcp_connector = None   # type: Union[tcp.Connector, TCPRelayConnector]
-        self.tcp_protocol = None    # type: MyDNSProtocol
+        self.tcp_protocol = None    # type: BugFixDNSProtocol
         self.tcp_waiting = set()    # type: Set[defer.Deferred]
 
-    def connectionMade(self, protocol: MyDNSProtocol):
+    def connectionMade(self, protocol: BugFixDNSProtocol):
         """
         Run pending TCP queries and add resulting deferreds to self.tcp_waiting.
         Called from MyDNSProtocol.
@@ -189,7 +189,7 @@ class BugFixResolver(BaseResolver):
             self.tcp_waiting.discard(requery_d)
             self.tcp_waiting.add(d)
 
-    def connectionLost(self, protocol: MyDNSProtocol):
+    def connectionLost(self, protocol: BugFixDNSProtocol):
         """
         TCP connection lost, remove disconnected protocol. 
         Called from MyDNSProtocol.
