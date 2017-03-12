@@ -120,8 +120,8 @@ class BugFixDNSClientFactory(ClientFactory):
         self.controller = controller
 
     def clientConnectionLost(self, connector, reason):
-        logger.debug('MyDNSClientFactory.clientConnectionLost: %r', reason)
-        # running queries will be cleaned later in MyDNSProtocol.connectionLost
+        logger.debug('BugFixDNSClientFactory.clientConnectionLost: %r', reason)
+        # running queries will be cleaned later in BugFixDNSProtocol.connectionLost
 
     def clientConnectionFailed(self, connector, reason):
         """
@@ -139,7 +139,7 @@ class BugFixDNSClientFactory(ClientFactory):
             C{deferred}.
         @type reason: L{twisted.python.failure.Failure}
         """
-        logger.debug('MyDNSClientFactory.clientConnectionFailed: %r', reason)
+        logger.debug('BugFixDNSClientFactory.clientConnectionFailed: %r', reason)
         # Copy the current pending deferreds then reset the master
         # pending list. This prevents triggering new deferreds which
         # may be added by callback or errback functions on the current
@@ -174,7 +174,7 @@ class BugFixResolver(BaseResolver):
     def connectionMade(self, protocol: BugFixDNSProtocol):
         """
         Run pending TCP queries and add resulting deferreds to self.tcp_waiting.
-        Called from MyDNSProtocol.
+        Called from BugFixDNSProtocol.
         """
         assert self.tcp_protocol is None
         self.tcp_protocol = protocol
@@ -192,7 +192,7 @@ class BugFixResolver(BaseResolver):
     def connectionLost(self, protocol: BugFixDNSProtocol):
         """
         TCP connection lost, remove disconnected protocol. 
-        Called from MyDNSProtocol.
+        Called from BugFixDNSProtocol.
         """
         assert protocol is self.tcp_protocol
         self.tcp_protocol = None
