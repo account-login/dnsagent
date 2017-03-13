@@ -139,7 +139,7 @@ class BugFixDNSClientFactory(ClientFactory):
         self.controller = controller
 
     def clientConnectionLost(self, connector, reason):
-        logger.debug('%s.clientConnectionLost: %r', type(self), reason)
+        logger.debug('%s.clientConnectionLost: %r', type(self).__name__, reason)
         # running queries will be cleaned later in BugFixDNSProtocol.connectionLost
 
     def clientConnectionFailed(self, connector, reason):
@@ -158,7 +158,7 @@ class BugFixDNSClientFactory(ClientFactory):
             C{deferred}.
         @type reason: L{twisted.python.failure.Failure}
         """
-        logger.debug('%s.clientConnectionFailed: %r', type(self), reason)
+        logger.debug('%s.clientConnectionFailed: %r', type(self).__name__, reason)
         # Copy the current pending deferreds then reset the master
         # pending list. This prevents triggering new deferreds which
         # may be added by callback or errback functions on the current
