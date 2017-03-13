@@ -259,6 +259,9 @@ class ExtendedDNSProtocol(ECSDNSProtocolMixin, BugFixDNSProtocol):
 
 
 class ExtendedDNSDatagramProtocol(ECSDNSProtocolMixin, BugFixDNSDatagramProtocol):
+    def startListening(self):
+        raise NotImplementedError('method removed')
+
     def query(self, address, queries, timeout=10, id=None, client_subnet: NetworkType = None):
         assert self.transport
         if id is None:
@@ -270,15 +273,6 @@ class ExtendedDNSDatagramProtocol(ECSDNSProtocolMixin, BugFixDNSDatagramProtocol
             self.writeMessage(m, address)
 
         return self._query(queries, timeout, id, write_message, client_subnet=client_subnet)
-
-
-class DNSDatagramProtocolOverSocks(ExtendedDNSDatagramProtocol):
-    def __init__(self, controller, reactor=None, relay: UDPRelay = None):
-        super().__init__(controller, reactor=reactor)
-        self.relay = relay
-
-    def startListening(self):
-        self.relay.listenUDP(0, self, maxPacketSize=512)    # ???
 
 
 class ExtendedDNSClientFactory(BugFixDNSClientFactory):
@@ -302,7 +296,7 @@ class ExtendedResolver(BugFixResolver):
             relay.stop()
             return ignore
 
-        proto = DNSDatagramProtocolOverSocks(self, reactor=self._reactor, relay=relay)
+        proto = ExtendedDNSDatagramProtocol(self, reactor=self._reactor)
         relay.listenUDP(0, proto, maxPacketSize=512)
 
         proto.query(*query_args).chainDeferred(query_d)
