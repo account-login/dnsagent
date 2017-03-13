@@ -225,6 +225,8 @@ class OPTClientSubnetOption(_OPTVariableOption):
 class ECSDNSProtocolMixin:
     """Add EDNS client subnet support for DNSProtocol and DNSDatagramProtocol"""
 
+    message_cls = EDNSMessage
+
     def _query(
             self: Union[dns.DNSMixin, 'ECSDNSProtocolMixin'],
             queries: List[dns.Query], timeout: float, id: int,
@@ -246,7 +248,7 @@ class ECSDNSProtocolMixin:
     def create_query_message(self, id: int, client_subnet: NetworkType):
         if client_subnet:
             ecs_option = OPTClientSubnetOption.from_subnet(client_subnet)
-            msg = EDNSMessage(id=id, recDes=True, options=[ecs_option])
+            msg = self.message_cls(id=id, recDes=True, options=[ecs_option])
             return msg
         else:
             return Message(id=id, recDes=True)
@@ -264,15 +266,12 @@ class ExtendedDNSDatagramProtocol(ECSDNSProtocolMixin, BugFixDNSDatagramProtocol
 
     def query(self, address, queries, timeout=10, id=None, client_subnet: NetworkType = None):
         assert self.transport
-        if id is None:
-            id = self.pickID()
-        else:
-            self.resends[id] = 1
 
         def write_message(m):
             self.writeMessage(m, address)
 
-        return self._query(queries, timeout, id, write_message, client_subnet=client_subnet)
+        msg_id = self.check_msg_id(id, timeout)
+        return self._query(queries, timeout, msg_id, write_message, client_subnet=client_subnet)
 
 
 class ExtendedDNSClientFactory(BugFixDNSClientFactory):

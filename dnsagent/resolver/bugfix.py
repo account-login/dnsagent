@@ -1,11 +1,11 @@
 import reprlib
 import struct
-from typing import Union, List, Set, Dict
+from typing import Union, List, Set, Dict, Optional
 
 from twisted.internet import defer, tcp
 from twisted.internet.protocol import ClientFactory
 from twisted.names import dns
-from twisted.names.dns import DNSProtocol, Message, DNSDatagramProtocol
+from twisted.names.dns import DNSProtocol, Message, DNSDatagramProtocol, randomSource
 from twisted.python.failure import Failure
 
 from dnsagent.resolver.base import BaseResolver
@@ -40,6 +40,9 @@ class BugFixDNSProtocol(DNSProtocol):
         1. self.liveMessages not handled when connection lost.
         2. dataReceived() fails on len(self.buffer) < 2
     """
+
+    message_cls = Message
+
     def connectionLost(self, reason):
         """
         Notify the controller that this protocol is no longer connected.
@@ -59,22 +62,15 @@ class BugFixDNSProtocol(DNSProtocol):
 
             # FIXED: self.length may be None
             if self.length is not None and len(self.buffer) >= self.length:
-                myChunk = self.buffer[:self.length]
-                m = Message()
-                m.fromStr(myChunk)
+                msg = self.message_cls()
+                msg.fromStr(self.buffer[:self.length])
 
-                try:
-                    d, canceller = self.liveMessages[m.id]
-                except KeyError:
-                    self.controller.messageReceived(m, self)
-                else:
-                    del self.liveMessages[m.id]
+                if msg.id in self.liveMessages:
+                    d, canceller = self.liveMessages.pop(msg.id)
                     canceller.cancel()
-                    # XXX: we shouldn't need this hack
-                    try:
-                        d.callback(m)
-                    except:
-                        logger.exception('exceptions in callback query result')
+                    d.callback(msg)
+                else:
+                    self.controller.messageReceived(msg, self)  # for DNSServerFactory
 
                 self.buffer = self.buffer[self.length:]
                 self.length = None
@@ -90,11 +86,50 @@ class BugFixDNSDatagramProtocol(DNSDatagramProtocol):
     """
     Fixed bugs:
         1. self.liveMessages not handled when stopping protocol
+        2. self.resends not expired
     """
+
+    message_cls = Message
+
     def stopProtocol(self):
         clean_dns_protocol(self, Failure(ProtocolStopped()))
-        self.resends = {}
+        for d in copy_and_clear(self.resends).values():
+            d.cancel()
         self.transport = None
+
+    def pickID(self) -> int:
+        while True:
+            msg_id = randomSource()
+            if msg_id not in self.liveMessages and msg_id not in self.resends:
+                return msg_id
+
+    def check_msg_id(self, msg_id: Optional[int], timeout: float):
+        """
+        Checks that weither this is a re-issued query, 
+        return a new id if not, or remember msg_id in self.resends
+        """
+        if msg_id is None:
+            msg_id = self.pickID()
+        else:
+            # query is a re-issue
+            # FIXED: self.resends not expired
+            if msg_id in self.resends:
+                self.resends.pop(msg_id).cancel()
+            resend_ttl = max(timeout * 2, 10)   # XXX: magic numbers
+            self.resends[msg_id] = self._reactor.callLater(
+                resend_ttl, self.removeResend, msg_id,
+            )
+
+        return msg_id
+
+    def query(self, address, queries, timeout=10, id=None):
+        assert self.transport
+
+        def write_message(m):
+            self.writeMessage(m, address)
+
+        msg_id = self.check_msg_id(id, timeout)
+        return self._query(queries, timeout, msg_id, write_message)
 
 
 class BugFixDNSClientFactory(ClientFactory):
