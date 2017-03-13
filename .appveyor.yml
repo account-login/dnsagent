@@ -10,7 +10,7 @@ environment:
     - PYTHON: "C:\\Python36-x64"
 
 init:
-  - "setx PATH %PYTHON%;%PYTHON%\\scripts;%PATH%"
+  - setx PATH "%PYTHON%;%PYTHON%\\scripts;%PATH%"
 
 install:
   # We need wheel installed to build wheels
