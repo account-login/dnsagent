@@ -4,7 +4,6 @@ import subprocess
 from io import BytesIO
 from ipaddress import ip_address
 
-import psutil
 import pytest
 from twisted.internet import address as taddress
 from twisted.internet import defer
@@ -619,22 +618,31 @@ class SSRunner:
 
     @classmethod
     def shutdown(cls):
-        def kill_proc_tree(pid):
-            parent = psutil.Process(pid)    # FIXME: psutil not available on cygwin
-            children = parent.children(recursive=True)
-            for child in children:
-                child.kill()
-            psutil.wait_procs(children, timeout=2)
-
-            try:
-                parent.kill()
-                parent.wait(2)
-            except Exception:
-                logger.exception('failed to kill process: %d', pid)
-
         for popen in (cls.ss_server, cls.ss_local):
             if popen.returncode is None:
-                kill_proc_tree(popen.pid)
+                kill_proccess(popen)
+
+
+def kill_proccess(popen: subprocess.Popen):
+    try:
+        import psutil
+    except ImportError:
+        popen.terminate()
+    else:
+        # kill process tree
+        # since python is a subprocess of sslocal/ssserver on windows
+        pid = popen.pid
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        for child in children:
+            child.kill()
+        psutil.wait_procs(children, timeout=2)
+
+        try:
+            parent.kill()
+            parent.wait(2)
+        except Exception:
+            logger.exception('failed to kill process: %d', pid)
 
 
 # noinspection PyAttributeOutsideInit
