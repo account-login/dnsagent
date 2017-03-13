@@ -31,12 +31,13 @@ class TCPOnlyBugFixResolver(BugFixResolver):
 class TestTCPBugFixResolver(BaseTestResolver):
     server_addr = ('127.0.0.53', 5353)
 
+    fake_resolver = FakeResolver()
+    fake_resolver.set_answer('asdf', '1.2.3.4')
+    fake_resolver.set_answer('fdsa', '4.3.2.1')
+    fake_resolver.delay = 0.01
+
     def setUp(self):
         super().setUp()
-        self.fake_resolver = FakeResolver()
-        self.fake_resolver.set_answer('asdf', '1.2.3.4')
-        self.fake_resolver.set_answer('fdsa', '4.3.2.1')
-        self.fake_resolver.delay = 0.01
 
         self.server = LoseConnectionDNSServerFactory(resolver=self.fake_resolver)
         self.app = App()
@@ -173,12 +174,11 @@ class TestReissue(unittest.TestCase):
     query = dns.Query(b'asdf', dns.A, dns.IN)
 
     def setUp(self):
-        self.server = DropRequestDNSServerFactory(resolver=self.fake_resolver)
+        server = DropRequestDNSServerFactory(resolver=self.fake_resolver)
         self.app = App()
-        self.app.start((self.server, [self.server_addr]))
+        self.app.start((server, [self.server_addr]))
 
         self.resolver = BugFixResolver(servers=[self.server_addr])
-        self.reactor = get_reactor()
 
     def tearDown(self):
         return self.app.stop()
