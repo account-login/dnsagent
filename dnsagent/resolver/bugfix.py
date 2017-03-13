@@ -1,50 +1,16 @@
-import logging
 import reprlib
 import struct
-from typing import Union, Set, List, Dict
+from typing import Union, List, Set, Dict
 
-from twisted.internet import defer
+from twisted.internet import defer, tcp
 from twisted.internet.protocol import ClientFactory
-from twisted.internet import tcp
-from twisted.names.client import Resolver as OriginResolver
-from twisted.names.dns import DNSDatagramProtocol, DNSProtocol, Message
+from twisted.names import dns
+from twisted.names.dns import DNSProtocol, Message, DNSDatagramProtocol
+from twisted.python.failure import Failure
 
-from dnsagent.resolver.base import patch_resolver
-from dnsagent.socks import SocksProxy, UDPRelay, TCPRelayConnector
-
-
-__all__ = ('ExtendedResolver', 'TCPExtendedResolver')
-
-
-logger = logging.getLogger(__name__)
-
-
-@patch_resolver
-class BaseResolver(OriginResolver):
-    """Resolver with an additional **kwargs in query() and lookupXXX() method"""
-    def _lookup(self, name, cls, type, timeout, **kwargs):
-        return super()._lookup(name, cls, type, timeout=timeout)
-
-    def __repr__(self):
-        cls = self.__class__.__name__
-        addr = self._repr_short_()
-        return '<{cls} {addr}>'.format_map(locals())
-
-    def _repr_short_(self):
-        ip, port = self.servers[0]
-        if port != 53:
-            return '{ip}:{port}'.format_map(locals())
-        else:
-            return ip
-
-
-class DNSDatagramProtocolOverSocks(DNSDatagramProtocol):
-    def __init__(self, controller, reactor=None, relay: UDPRelay = None):
-        super().__init__(controller, reactor=reactor)
-        self.relay = relay
-
-    def startListening(self):
-        self.relay.listenUDP(0, self, maxPacketSize=512)    # ???
+from dnsagent.resolver.base import BaseResolver
+from dnsagent.socks import TCPRelayConnector
+from dnsagent import logger
 
 
 def copy_and_clear(container: Union[List, Set, Dict]):
@@ -52,6 +18,18 @@ def copy_and_clear(container: Union[List, Set, Dict]):
         return container.copy()
     finally:
         container.clear()
+
+
+def clean_dns_protocol(protocol: dns.DNSMixin, reason: Failure):
+    live_msg = copy_and_clear(protocol.liveMessages)
+    if live_msg:
+        logger.error(
+            '%r stopped, %d unhandled queries: %s',
+            protocol, len(live_msg), reprlib.repr(live_msg),
+        )
+    for d, canceller in live_msg.values():
+        d.errback(reason)
+        canceller.cancel()
 
 
 class BugFixDNSProtocol(DNSProtocol):
@@ -68,16 +46,7 @@ class BugFixDNSProtocol(DNSProtocol):
         And fail all running TCP queries.
         """
         self.controller.connectionLost(self)
-
-        live_msg = copy_and_clear(self.liveMessages)
-        if live_msg:
-            logger.error(
-                'connection lost, %d unhandled queries: %s',
-                len(live_msg), reprlib.repr(live_msg),
-            )
-        for d, canceller in live_msg.values():
-            d.errback(reason)
-            canceller.cancel()
+        clean_dns_protocol(self, reason)
 
     def dataReceived(self, data):
         """Bug fixed"""
@@ -111,6 +80,21 @@ class BugFixDNSProtocol(DNSProtocol):
                 self.length = None
             else:
                 break
+
+
+class ProtocolStopped(Exception):
+    pass
+
+
+class BugFixDNSDatagramProtocol(DNSDatagramProtocol):
+    """
+    Fixed bugs:
+        1. self.liveMessages not handled when stopping protocol
+    """
+    def stopProtocol(self):
+        clean_dns_protocol(self, Failure(ProtocolStopped()))
+        self.resends = {}
+        self.transport = None
 
 
 class BugFixDNSClientFactory(ClientFactory):
@@ -156,15 +140,18 @@ class BugFixDNSClientFactory(ClientFactory):
 
 class BugFixResolver(BaseResolver):
     """
-    Some TCP related bugs in OriginResolver is fixed:
+    Some TCP related bugs in OriginResolver are fixed:
         1. TCP connection not closed.
         2. Bad TCP connection reuse logic.
         3. Connection lost not handled.
     """
+
+    client_factory_cls = BugFixDNSClientFactory
+
     def __init__(self, resolv=None, servers=None, timeout=(1, 3, 11, 45), reactor=None):
         super().__init__(resolv=resolv, servers=servers, timeout=timeout, reactor=reactor)
         # override attributes in super().__init__()
-        self.factory = BugFixDNSClientFactory(self)
+        self.factory = self.client_factory_cls(self)
         del self.connections
 
         self.tcp_connector = None   # type: Union[tcp.Connector, TCPRelayConnector]
@@ -246,51 +233,3 @@ class BugFixResolver(BaseResolver):
             logger.debug('no waiting queries, disconnect TCP connection.')
             self.tcp_connector.disconnect()     # may be already disconnected
         return ignore
-
-
-class ExtendedResolver(BugFixResolver):
-    """A resolver that supports SOCKS5 proxy."""
-
-    def __init__(
-            self, resolv=None, servers=None, timeout=(1, 3, 11, 45), reactor=None,
-            socks_proxy: SocksProxy = None
-    ):
-        super().__init__(resolv=resolv, servers=servers, timeout=timeout, reactor=reactor)
-        self.socks_proxy = socks_proxy
-
-    def _got_udp_relay(self, relay: UDPRelay, query_d, *query_args):
-        def stop_relay(ignore):
-            relay.stop()
-            return ignore
-
-        proto = DNSDatagramProtocolOverSocks(self, reactor=self._reactor, relay=relay)
-        relay.listenUDP(0, proto, maxPacketSize=512)
-
-        proto.query(*query_args).chainDeferred(query_d)
-        query_d.addBoth(stop_relay)
-
-    def _query(self, *args):
-        """Run UDP query"""
-        if self.socks_proxy is not None:
-            d = defer.Deferred()
-            relay_d = self.socks_proxy.get_udp_relay()
-            relay_d.addCallback(self._got_udp_relay, d, *args)
-            relay_d.addErrback(d.errback)
-            return d
-        else:
-            return super()._query(*args)
-
-    def connect_tcp(self, host: str, port: int, factory: ClientFactory):
-        if self.socks_proxy:
-            return self.socks_proxy.connectTCP(host, port, self.factory)
-        else:
-            return super().connect_tcp(host, port, factory)
-
-
-class TCPExtendedResolver(ExtendedResolver):
-    # TODO: merge this into ExtendedResolver
-    def queryUDP(self, queries, timeout=None):
-        return self.queryTCP(queries)
-
-    def _repr_short_(self):
-        return 'tcp://' + super()._repr_short_()

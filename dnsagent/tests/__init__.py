@@ -59,6 +59,13 @@ class FakeResolver(MyResolverBase):
                 self.map[key] = ([], [], [])
             self.map[key][0].append(rr)
 
+    # for twisted.names.client.Resolver
+    def connectionMade(self, protocol):
+        pass
+
+    def connectionLost(self, reason):
+        pass
+
     def __repr__(self):
         return '<Fake {:#x}>'.format(id(self))
 

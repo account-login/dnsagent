@@ -17,7 +17,7 @@ from twisted.python.failure import Failure
 from twisted.trial import unittest
 
 from dnsagent.app import App
-from dnsagent.resolver.basic import ExtendedResolver, TCPExtendedResolver
+from dnsagent.resolver.extended import ExtendedResolver, TCPExtendedResolver
 from dnsagent.socks import (
     read_socks_host, encode_socks_host, SocksHost, BadSocksHost, InsufficientData,
     Socks5Reply, BadSocks5Reply,

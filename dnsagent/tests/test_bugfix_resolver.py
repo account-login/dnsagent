@@ -3,7 +3,7 @@ from twisted.internet.error import ConnectionDone
 from twisted.python.failure import Failure
 
 from dnsagent.app import App
-from dnsagent.resolver.basic import BugFixResolver
+from dnsagent.resolver.bugfix import BugFixResolver
 from dnsagent.server import MyDNSServerFactory
 from dnsagent.tests import BaseTestResolver, FakeResolver, iplist
 from dnsagent.utils import get_reactor
@@ -58,7 +58,7 @@ class TestTCPBugFixResolver(BaseTestResolver):
         def check_finished_state(ignore):
             assert not self.resolver.pending
             assert not self.resolver.tcp_waiting
-            self.reactor.callLater(0.001,
+            self.reactor.callLater(0.002,
                 lambda: defer.maybeDeferred(check_disconnected)
                     .chainDeferred(final_d))
 
@@ -94,6 +94,10 @@ class TestTCPBugFixResolver(BaseTestResolver):
 
         # reconnect
         self.check_a('fdsa', iplist('4.3.2.1'))
+
+
+# TODO: TestUDPBugFixResolver
+# TODO: test dnsagent.resolver.bugfix.BugFixDNSProtocol#dataReceived
 
 
 del BaseTestResolver

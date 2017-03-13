@@ -1,5 +1,6 @@
 from twisted.internet import defer
 from twisted.names import dns
+from twisted.names.client import Resolver as OriginResolver
 from twisted.names.common import ResolverBase
 from twisted.python.failure import Failure
 
@@ -106,3 +107,22 @@ def patch_resolver(cls):
                 setattr(cls, k, v)
 
     return cls
+
+
+@patch_resolver
+class BaseResolver(OriginResolver):
+    """Original twisted resolver with an additional **kwargs in query() and lookupXXX() method"""
+    def _lookup(self, name, cls, type, timeout, **kwargs):
+        return super()._lookup(name, cls, type, timeout=timeout)
+
+    def __repr__(self):
+        cls = self.__class__.__name__
+        addr = self._repr_short_()
+        return '<{cls} {addr}>'.format_map(locals())
+
+    def _repr_short_(self):
+        ip, port = self.servers[0]
+        if port != 53:
+            return '{ip}:{port}'.format_map(locals())
+        else:
+            return ip

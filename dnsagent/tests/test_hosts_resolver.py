@@ -42,8 +42,8 @@ class TestHostsResolver(BaseTestResolver):
     def setup_resolver(self, hosts_string):
         fd, hosts_file = tempfile.mkstemp(prefix='hosts_', suffix='.txt', text=True)
         os.write(fd, hosts_string.encode('utf8'))
-        self.resolver = HostsResolver(filename=hosts_file)
         os.close(fd)
+        self.resolver = HostsResolver(filename=hosts_file)
         self.addCleanup(os.unlink, hosts_file)
 
     def test_resolve(self):
