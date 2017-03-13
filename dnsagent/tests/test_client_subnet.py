@@ -48,13 +48,17 @@ def test_opt_client_subnet_option_parse_data():
     E(b'\0\1\x18')              # data too short
 
 
+def swallow(ignore):
+    pass
+
+
 def test_extended_dns_protocol():
     fake_transport = FakeTransport()
     proto = ExtendedDNSProtocol(FakeResolver())
     proto.makeConnection(fake_transport)
 
     q = dns.Query(b'asdf', dns.A, dns.IN)
-    proto.query([q], client_subnet=ip_network('1.2.3.0/24'))
+    proto.query([q], client_subnet=ip_network('1.2.3.0/24')).addErrback(swallow)
     proto.connectionLost(connectionDone)    # clear delayed call
     writed, addr = fake_transport.write_logs.pop()
 
@@ -69,7 +73,9 @@ def test_extended_dns_datagram_protocol():
     proto.makeConnection(fake_transport)
 
     q = dns.Query(b'asdf', dns.A, dns.IN)
-    proto.query(('2.3.4.5', 0x2345), [q], client_subnet=ip_network('1.2.3.0/24'))
+    proto.query(
+        ('2.3.4.5', 0x2345), [q], client_subnet=ip_network('1.2.3.0/24')
+    ).addErrback(swallow)
     proto.doStop()  # clear delayed call
     writed, addr = fake_transport.write_logs.pop()
 
