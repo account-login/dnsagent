@@ -8,7 +8,7 @@ from twisted.names import dns
 from twisted.trial import unittest
 
 from dnsagent.resolver.extended import (
-    OPTClientSubnetOption, BadOPTClientSubnetData,
+    OPTClientSubnetOption, BadOPTClientSubnetData, QueryList,
     ExtendedDNSProtocol, ExtendedDNSDatagramProtocol, EDNSMessage,
 )
 from dnsagent.tests import FakeTransport, FakeResolver
@@ -59,8 +59,8 @@ def swallow(ignore):
 class BaseTestExtendedDNSXXXProtcol(unittest.TestCase):
     protocol_cls = None # type: Union[Type[ExtendedDNSProtocol], Type[ExtendedDNSDatagramProtocol]]
 
-    query = dns.Query(b'asdf', dns.A, dns.IN)
     subnet = ip_network('1.2.3.0/24')
+    queries = QueryList([(dns.Query(b'asdf', dns.A, dns.IN))], client_subnet=subnet)
     ecs_option = OPTClientSubnetOption.from_subnet(subnet)
 
     def setUp(self):
@@ -70,12 +70,12 @@ class BaseTestExtendedDNSXXXProtcol(unittest.TestCase):
         self.proto.makeConnection(self.fake_transport)
 
     def test_query(self):
-        data = self.do_query(self.query)
+        data = self.do_query(self.queries)
         emsg = EDNSMessage()
         emsg.fromStr(data)
         assert emsg.options == [self.ecs_option]
 
-    def do_query(self, query: dns.Query) -> bytes:
+    def do_query(self, queries: QueryList) -> bytes:
         raise NotImplementedError
 
     def test_receive(self):
@@ -92,8 +92,8 @@ class BaseTestExtendedDNSXXXProtcol(unittest.TestCase):
 class TestExtendedDNSProtocol(BaseTestExtendedDNSXXXProtcol):
     protocol_cls = ExtendedDNSProtocol
 
-    def do_query(self, query: dns.Query):
-        self.proto.query([query], client_subnet=self.subnet).addErrback(swallow)
+    def do_query(self, queries: QueryList) -> bytes:
+        self.proto.query(queries).addErrback(swallow)
         self.proto.connectionLost(connectionDone)
 
         writed, addr = self.fake_transport.write_logs.pop()
@@ -107,8 +107,8 @@ class TestExtendedDNSProtocol(BaseTestExtendedDNSXXXProtcol):
 class TestExtendedDNSDatagramProtocol(BaseTestExtendedDNSXXXProtcol):
     protocol_cls = ExtendedDNSDatagramProtocol
 
-    def do_query(self, query: dns.Query):
-        d = self.proto.query(('2.3.4.5', 0x2345), [query], client_subnet=self.subnet)
+    def do_query(self, queries: QueryList) -> bytes:
+        d = self.proto.query(('2.3.4.5', 0x2345), queries)
         d.addErrback(swallow)
         self.proto.doStop()
 

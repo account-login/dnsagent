@@ -124,6 +124,9 @@ class BugFixDNSDatagramProtocol(DNSDatagramProtocol):
 
         return msg_id
 
+    def startListening(self):
+        raise NotImplementedError('method removed')
+
     def query(self, address, queries, timeout=10, id=None):
         assert self.transport
 

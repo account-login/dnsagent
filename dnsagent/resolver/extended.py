@@ -222,6 +222,23 @@ class OPTClientSubnetOption(_OPTVariableOption):
         return subnet, scope_prefix
 
 
+class QueryList(List[dns.Query]):
+    """This is a hack that add additional information to DNS query."""
+
+    def __init__(self, iterable, *, client_subnet: NetworkType = None):
+        super().__init__(iterable)
+        self.client_subnet = client_subnet or getattr(iterable, 'client_subnet', None)
+
+    def copy(self):
+        return type(self)(self, client_subnet=self.client_subnet)
+
+    def __getitem__(self, item):
+        ret = super().__getitem__(item)
+        if isinstance(item, slice):
+            ret = type(self)(ret, client_subnet=self.client_subnet)
+        return ret
+
+
 class ECSDNSProtocolMixin:
     """Add EDNS client subnet support for DNSProtocol and DNSDatagramProtocol"""
 
@@ -229,14 +246,15 @@ class ECSDNSProtocolMixin:
 
     def _query(
             self: Union[dns.DNSMixin, 'ECSDNSProtocolMixin'],
-            queries: List[dns.Query], timeout: float, id: int,
-            write_message: Callable[[Message], None], client_subnet: NetworkType = None
+            queries: QueryList, timeout: float, id: int,
+            write_message: Callable[[Message], None]
     ):
-        m = self.create_query_message(id=id, client_subnet=client_subnet)
-        m.queries = queries
+        client_subnet = getattr(queries, 'client_subnet', None)
+        msg = self.create_query_message(id=id, client_subnet=client_subnet)
+        msg.queries = queries
 
         try:
-            write_message(m)
+            write_message(msg)
         except Exception:
             return defer.fail()
 
@@ -255,23 +273,11 @@ class ECSDNSProtocolMixin:
 
 
 class ExtendedDNSProtocol(ECSDNSProtocolMixin, BugFixDNSProtocol):
-    def query(self, queries, timeout=60, client_subnet: NetworkType = None):
-        id = self.pickID()
-        return self._query(queries, timeout, id, self.writeMessage, client_subnet=client_subnet)
+    pass
 
 
 class ExtendedDNSDatagramProtocol(ECSDNSProtocolMixin, BugFixDNSDatagramProtocol):
-    def startListening(self):
-        raise NotImplementedError('method removed')
-
-    def query(self, address, queries, timeout=10, id=None, client_subnet: NetworkType = None):
-        assert self.transport
-
-        def write_message(m):
-            self.writeMessage(m, address)
-
-        msg_id = self.check_msg_id(id, timeout)
-        return self._query(queries, timeout, msg_id, write_message, client_subnet=client_subnet)
+    pass
 
 
 class ExtendedDNSClientFactory(BugFixDNSClientFactory):
