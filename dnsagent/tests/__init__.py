@@ -31,6 +31,7 @@ class FakeResolver(MyResolverBase):
         super().__init__()
         self.delay = 0
         self.map = dict()
+        self.msg_logs = []
         self.reactor = get_reactor(reactor)
 
     def _lookup(self, name, cls, type_, timeout, **kwargs):
@@ -65,6 +66,9 @@ class FakeResolver(MyResolverBase):
 
     def connectionLost(self, reason):
         pass
+
+    def messageReceived(self, msg, protocol, addr=None):
+        self.msg_logs.append(msg)
 
     def __repr__(self):
         return '<Fake {:#x}>'.format(id(self))

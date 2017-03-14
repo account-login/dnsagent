@@ -1,8 +1,11 @@
 from ipaddress import ip_network
+import struct
+from typing import Union, Type
 
 import pytest
 from twisted.internet.protocol import connectionDone
 from twisted.names import dns
+from twisted.trial import unittest
 
 from dnsagent.resolver.extended import (
     OPTClientSubnetOption, BadOPTClientSubnetData,
@@ -52,33 +55,68 @@ def swallow(ignore):
     pass
 
 
-def test_extended_dns_protocol():
-    fake_transport = FakeTransport()
-    proto = ExtendedDNSProtocol(FakeResolver())
-    proto.makeConnection(fake_transport)
+# noinspection PyAttributeOutsideInit
+class BaseTestExtendedDNSXXXProtcol(unittest.TestCase):
+    protocol_cls = None # type: Union[Type[ExtendedDNSProtocol], Type[ExtendedDNSDatagramProtocol]]
 
-    q = dns.Query(b'asdf', dns.A, dns.IN)
-    proto.query([q], client_subnet=ip_network('1.2.3.0/24')).addErrback(swallow)
-    proto.connectionLost(connectionDone)    # clear delayed call
-    writed, addr = fake_transport.write_logs.pop()
+    query = dns.Query(b'asdf', dns.A, dns.IN)
+    subnet = ip_network('1.2.3.0/24')
+    ecs_option = OPTClientSubnetOption.from_subnet(subnet)
 
-    emsg = EDNSMessage()
-    emsg.fromStr(writed[2:])
-    assert emsg.options == [OPTClientSubnetOption.from_subnet(ip_network('1.2.3.0/24'))]
+    def setUp(self):
+        self.fake_transport = FakeTransport()
+        self.fake_resolver = FakeResolver()
+        self.proto = self.protocol_cls(self.fake_resolver)
+        self.proto.makeConnection(self.fake_transport)
+
+    def test_query(self):
+        data = self.do_query(self.query)
+        emsg = EDNSMessage()
+        emsg.fromStr(data)
+        assert emsg.options == [self.ecs_option]
+
+    def do_query(self, query: dns.Query) -> bytes:
+        raise NotImplementedError
+
+    def test_receive(self):
+        msg = EDNSMessage(options=[self.ecs_option])
+        self.protocol_receive(msg)
+        received_msg = self.fake_resolver.msg_logs.pop()
+        assert received_msg == msg
+        assert received_msg.options == [self.ecs_option]
+
+    def protocol_receive(self, msg: EDNSMessage):
+        raise NotImplementedError
 
 
-def test_extended_dns_datagram_protocol():
-    fake_transport = FakeTransport()
-    proto = ExtendedDNSDatagramProtocol(FakeResolver())
-    proto.makeConnection(fake_transport)
+class TestExtendedDNSProtocol(BaseTestExtendedDNSXXXProtcol):
+    protocol_cls = ExtendedDNSProtocol
 
-    q = dns.Query(b'asdf', dns.A, dns.IN)
-    proto.query(
-        ('2.3.4.5', 0x2345), [q], client_subnet=ip_network('1.2.3.0/24')
-    ).addErrback(swallow)
-    proto.doStop()  # clear delayed call
-    writed, addr = fake_transport.write_logs.pop()
+    def do_query(self, query: dns.Query):
+        self.proto.query([query], client_subnet=self.subnet).addErrback(swallow)
+        self.proto.connectionLost(connectionDone)
 
-    emsg = EDNSMessage()
-    emsg.fromStr(writed)
-    assert emsg.options == [OPTClientSubnetOption.from_subnet(ip_network('1.2.3.0/24'))]
+        writed, addr = self.fake_transport.write_logs.pop()
+        return writed[2:]
+
+    def protocol_receive(self, msg: EDNSMessage):
+        data = msg.toStr()
+        self.proto.dataReceived(struct.pack('!H', len(data)) + data)
+
+
+class TestExtendedDNSDatagramProtocol(BaseTestExtendedDNSXXXProtcol):
+    protocol_cls = ExtendedDNSDatagramProtocol
+
+    def do_query(self, query: dns.Query):
+        d = self.proto.query(('2.3.4.5', 0x2345), [query], client_subnet=self.subnet)
+        d.addErrback(swallow)
+        self.proto.doStop()
+
+        writed, addr = self.fake_transport.write_logs.pop()
+        return writed
+
+    def protocol_receive(self, msg: EDNSMessage):
+        self.proto.datagramReceived(msg.toStr(), ('2.3.4.5', 0x2345))
+
+
+del BaseTestExtendedDNSXXXProtcol

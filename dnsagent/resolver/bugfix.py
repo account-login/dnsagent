@@ -87,6 +87,7 @@ class BugFixDNSDatagramProtocol(DNSDatagramProtocol):
     Fixed bugs:
         1. self.liveMessages not handled when stopping protocol
         2. self.resends not expired
+        3. self.pickID() not checking self.resends
     """
 
     message_cls = Message
@@ -100,6 +101,7 @@ class BugFixDNSDatagramProtocol(DNSDatagramProtocol):
     def pickID(self) -> int:
         while True:
             msg_id = randomSource()
+            # FIXED: preventing re-use id from self.resends
             if msg_id not in self.liveMessages and msg_id not in self.resends:
                 return msg_id
 
@@ -125,11 +127,34 @@ class BugFixDNSDatagramProtocol(DNSDatagramProtocol):
     def query(self, address, queries, timeout=10, id=None):
         assert self.transport
 
-        def write_message(m):
-            self.writeMessage(m, address)
+        def write_message(msg):
+            self.writeMessage(msg, address)
 
         msg_id = self.check_msg_id(id, timeout)
         return self._query(queries, timeout, msg_id, write_message)
+
+    def datagramReceived(self, data: bytes, addr):
+        """Overrided to use self.message_cls"""
+        msg = self.message_cls()
+        try:
+            msg.fromStr(data)
+        except EOFError:
+            logger.error("Truncated packet (%d bytes) from %s", len(data), addr)
+            return
+        except:
+            # Nothing should trigger this, but since we're potentially
+            # invoking a lot of different decoding methods, we might as well
+            # be extra cautious.  Anything that triggers this is itself
+            # buggy.
+            logger.exception("Unexpected decoding error")
+            return
+
+        if msg.id in self.liveMessages:
+            d, canceller = self.liveMessages.pop(msg.id)
+            canceller.cancel()
+            d.callback(msg)
+        elif msg.id not in self.resends:
+            self.controller.messageReceived(msg, self, addr)
 
 
 class BugFixDNSClientFactory(ClientFactory):
@@ -177,7 +202,7 @@ class BugFixResolver(BaseResolver):
     """
     Some TCP related bugs in OriginResolver are fixed:
         1. TCP connection not closed.
-        2. Bad TCP connection reuse logic.
+        2. Bad TCP connection re-use logic.
         3. Connection lost not handled.
     """
 
@@ -248,7 +273,7 @@ class BugFixResolver(BaseResolver):
             self.pending.append((d, queries, timeout))
             return d.addBoth(self._tcp_query_finished, d)
         else:
-            # reuse existing TCP connection
+            # re-use existing TCP connection
             assert self.tcp_connector.state == 'connected'
             d = self.tcp_protocol.query(queries, timeout=timeout)
             self.tcp_waiting.add(d)
