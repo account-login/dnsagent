@@ -7,6 +7,9 @@ from twisted.trial import unittest
 
 from dnsagent.app import App
 from dnsagent.resolver.bugfix import BugFixResolver, BugFixDNSDatagramProtocol
+from dnsagent.resolver.extended import (
+    ExtendedResolver, TCPExtendedResolver, ExtendedDNSDatagramProtocol,
+)
 from dnsagent.server import MyDNSServerFactory
 from dnsagent.tests import BaseTestResolver, FakeResolver, iplist, FakeTransport
 from dnsagent.utils import get_reactor
@@ -29,6 +32,8 @@ class TCPOnlyBugFixResolver(BugFixResolver):
 
 
 class TestTCPBugFixResolver(BaseTestResolver):
+    resolver_cls = TCPOnlyBugFixResolver
+
     server_addr = ('127.0.0.53', 5353)
 
     fake_resolver = FakeResolver()
@@ -43,7 +48,7 @@ class TestTCPBugFixResolver(BaseTestResolver):
         self.app = App()
         self.app.start((self.server, [self.server_addr]))
 
-        self.resolver = TCPOnlyBugFixResolver(servers=[self.server_addr])
+        self.resolver = self.resolver_cls(servers=[self.server_addr])
         self.reactor = get_reactor()
 
     def tearDown(self):
@@ -100,11 +105,17 @@ class TestTCPBugFixResolver(BaseTestResolver):
         self.check_a('fdsa', iplist('4.3.2.1'))
 
 
+class TestTCPBugFixResolverWithExtended(TestTCPBugFixResolver):
+    resolver_cls = TCPExtendedResolver
+
+
 def swallow(ignore):
     pass
 
 
 class TestDNSDatagramProtocolResendsExpiration(unittest.TestCase):
+    protocol_cls = BugFixDNSDatagramProtocol
+
     discard_host = '127.0.3.3'
     discard_port = 3456
     discard_addr = (discard_host, discard_port)
@@ -113,7 +124,7 @@ class TestDNSDatagramProtocolResendsExpiration(unittest.TestCase):
 
     def setUp(self):
         self.clock = task.Clock()
-        self.protocol = BugFixDNSDatagramProtocol(FakeResolver(), reactor=self.clock)
+        self.protocol = self.protocol_cls(FakeResolver(), reactor=self.clock)
         self.protocol.makeConnection(FakeTransport())
 
         self.discard = get_reactor().listenUDP(
@@ -157,6 +168,12 @@ class TestDNSDatagramProtocolResendsExpiration(unittest.TestCase):
         assert not self.clock.calls
 
 
+class TestDNSDatagramProtocolResendsExpirationWithExtended(
+    TestDNSDatagramProtocolResendsExpiration
+):
+    protocol_cls = ExtendedDNSDatagramProtocol
+
+
 class DropRequestDNSServerFactory(MyDNSServerFactory):
     drops = 1
 
@@ -168,6 +185,8 @@ class DropRequestDNSServerFactory(MyDNSServerFactory):
 
 
 class TestReissue(unittest.TestCase):
+    resolver_cls = BugFixResolver
+
     server_addr = ('127.0.0.54', 5454)
     fake_resolver = FakeResolver()
     fake_resolver.set_answer('asdf', '1.2.3.4')
@@ -178,7 +197,7 @@ class TestReissue(unittest.TestCase):
         self.app = App()
         self.app.start((server, [self.server_addr]))
 
-        self.resolver = BugFixResolver(servers=[self.server_addr])
+        self.resolver = self.resolver_cls(servers=[self.server_addr])
 
     def tearDown(self):
         return self.app.stop()
@@ -193,6 +212,10 @@ class TestReissue(unittest.TestCase):
 
     def test_reissue(self):
         return self.resolver.query(self.query, timeout=[0.01, 0.02])
+
+
+class TestReissueWithExtended(TestReissue):
+    resolver_cls = ExtendedResolver
 
 
 # TODO: TestUDPBugFixResolver
