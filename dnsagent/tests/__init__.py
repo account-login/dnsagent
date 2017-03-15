@@ -12,7 +12,7 @@ from twisted.trial import unittest
 
 from dnsagent.app import init_log, enable_log
 from dnsagent.utils import rrheader_to_ip, get_reactor, to_twisted_addr
-from dnsagent.resolver.base import MyResolverBase
+from dnsagent.resolver.base import BaseResolver
 
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def iplist(*lst):
     return [ip_address(ip) for ip in lst]
 
 
-class FakeResolver(MyResolverBase):
+class FakeResolver(BaseResolver):
     def __init__(self, reactor=None):
         super().__init__()
         self.delay = 0

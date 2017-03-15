@@ -8,10 +8,10 @@ from dnsagent import logger
 from dnsagent.utils import repr_short
 
 
-__all__ = ('MyResolverBase', 'patch_resolver')
+__all__ = ('BaseResolver', 'patch_resolver', 'PatchedOriginResolver')
 
 
-class MyResolverBase(ResolverBase):
+class BaseResolver(ResolverBase):
     """
     Add kwargs to query() method, so additional information
     can by passed to resolver and sub-resovler.
@@ -101,7 +101,7 @@ class MyResolverBase(ResolverBase):
 
 
 def patch_resolver(cls):
-    for k, v in MyResolverBase.__dict__.items():
+    for k, v in BaseResolver.__dict__.items():
         if k.startswith('lookup') or k in ('query', '_lookup'):
             if k not in cls.__dict__:
                 setattr(cls, k, v)
@@ -110,7 +110,7 @@ def patch_resolver(cls):
 
 
 @patch_resolver
-class BaseResolver(OriginResolver):
+class PatchedOriginResolver(OriginResolver):
     """Original twisted resolver with an additional **kwargs in query() and lookupXXX() method"""
     def _lookup(self, name, cls, type, timeout, **kwargs):
         return super()._lookup(name, cls, type, timeout=timeout)

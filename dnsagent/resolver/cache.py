@@ -4,14 +4,14 @@ from twisted.internet import defer
 from twisted.names import dns
 
 from dnsagent import logger
-from dnsagent.resolver.base import MyResolverBase
+from dnsagent.resolver.base import BaseResolver
 from dnsagent.utils import get_reactor
 
 
 __all__ = ('CachingResolver',)
 
 
-class CachingResolver(MyResolverBase):
+class CachingResolver(BaseResolver):
     """
     A resolver that caches the output of another resolver.
 

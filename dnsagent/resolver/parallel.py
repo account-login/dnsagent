@@ -6,7 +6,7 @@ from twisted.names.error import ResolverError
 from twisted.python.failure import Failure
 
 from dnsagent import logger
-from dnsagent.resolver.base import MyResolverBase
+from dnsagent.resolver.base import BaseResolver
 from dnsagent.utils import PrefixedLogger, get_reactor, repr_short
 
 
@@ -105,7 +105,7 @@ class ParalledQueryHandler:
             self.resolve_fail(Failure(ResolverError('no result selected')))
 
 
-class PoliciedParallelResolver(MyResolverBase):
+class PoliciedParallelResolver(BaseResolver):
     def __init__(self, resolvers: Sequence, policy: BaseParalledResolverPolicy):
         super().__init__()
         assert len(resolvers) > 0

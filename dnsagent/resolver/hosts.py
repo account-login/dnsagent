@@ -7,7 +7,7 @@ from twisted.names import dns
 from twisted.python.failure import Failure
 
 from dnsagent import logger
-from dnsagent.resolver.base import MyResolverBase
+from dnsagent.resolver.base import BaseResolver
 from dnsagent.utils import watch_modification
 
 
@@ -57,7 +57,7 @@ def read_hosts_file(filename: str):
         return parse_hosts_file(fp)
 
 
-class HostsResolver(MyResolverBase):
+class HostsResolver(BaseResolver):
     """
     A resolver that services hosts(5) format files.
 

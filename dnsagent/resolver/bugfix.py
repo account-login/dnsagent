@@ -8,7 +8,7 @@ from twisted.names import dns
 from twisted.names.dns import DNSProtocol, Message, DNSDatagramProtocol, randomSource
 from twisted.python.failure import Failure
 
-from dnsagent.resolver.base import BaseResolver
+from dnsagent.resolver.base import PatchedOriginResolver
 from dnsagent.socks import TCPRelayConnector
 from dnsagent import logger
 
@@ -201,7 +201,7 @@ class BugFixDNSClientFactory(ClientFactory):
         return p
 
 
-class BugFixResolver(BaseResolver):
+class BugFixResolver(PatchedOriginResolver):
     """
     Some TCP related bugs in OriginResolver are fixed:
         1. TCP connection not closed.

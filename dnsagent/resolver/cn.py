@@ -4,7 +4,7 @@ from typing import Union
 from iprir.ipset import IpSet
 from twisted.names import dns
 
-from dnsagent.resolver import MyResolverBase
+from dnsagent.resolver import BaseResolver
 from dnsagent.utils import rrheader_to_ip, repr_short
 
 
@@ -15,7 +15,7 @@ class MayBePolluted(Exception):
     pass
 
 
-class CnResolver(MyResolverBase):
+class CnResolver(BaseResolver):
     cn4_set = None
     cn6_set = None
 
