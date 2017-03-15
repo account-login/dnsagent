@@ -46,7 +46,7 @@ class EDNSMessage(_EDNSMessage):
             checkingDisabled=checkingDisabled, maxSize=maxSize,
             queries=queries, answers=answers, authority=authority, additional=additional,
         )
-        self.options = options
+        self.options = options or []    # type: List[_OPTVariableOption]
 
     @classmethod
     def _fromMessage(cls, message: Message):
