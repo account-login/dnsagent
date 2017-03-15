@@ -10,6 +10,7 @@ from twisted.names import dns
 from twisted.names.dns import (
     Message, _EDNSMessage, _OPTHeader, _OPTVariableOption,
 )
+from twisted.python.failure import Failure
 
 from dnsagent.resolver.bugfix import (
     BugFixDNSProtocol, BugFixDNSDatagramProtocol, BugFixDNSClientFactory, BugFixResolver,
@@ -284,7 +285,44 @@ class ExtendedDNSClientFactory(BugFixDNSClientFactory):
     protocol = ExtendedDNSProtocol
 
 
-class ExtendedResolver(BugFixResolver):
+class ECSResolverMixin:
+    """Add EDNS client subnet support for Resolver"""
+
+    def filterAnswers(self: 'ExtendedResolver', message, client_subnet: NetworkType = None):
+        """Overrided for the client_subnet argument"""
+        if message.trunc:
+            queries = QueryList(message.queries, client_subnet=client_subnet)
+            return self.queryTCP(queries).addCallback(self.filterAnswers)
+        elif message.rCode != dns.OK:
+            return Failure(self.exceptionForCode(message.rCode)(message))
+        else:
+            return message.answers, message.authority, message.additional
+
+    def _lookup(
+            self: 'ExtendedResolver', name, cls, type_, timeout,
+            client_subnet: NetworkType = None, **kwargs
+    ):
+        """Overrided for the client_subnet argument"""
+        key = (name, type_, cls)
+        waiting = self._waiting.get(key)
+        if waiting is None:
+            self._waiting[key] = []
+            queries = QueryList([dns.Query(name, type_, cls)], client_subnet=client_subnet)
+            d = self.queryUDP(queries, timeout)
+            d.addCallback(self.filterAnswers, client_subnet=client_subnet)
+            d.addBoth(self._wake_waiting_queries, key)
+        else:
+            d = defer.Deferred()
+            waiting.append(d)
+        return d
+
+    def _wake_waiting_queries(self: 'ExtendedResolver', result, key):
+        for d in self._waiting.pop(key):
+            d.callback(result)
+        return result
+
+
+class ExtendedResolver(ECSResolverMixin, BugFixResolver):
     """A resolver that supports SOCKS5 proxy."""
 
     client_factory_cls = ExtendedDNSClientFactory

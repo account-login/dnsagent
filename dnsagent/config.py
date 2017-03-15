@@ -6,7 +6,7 @@ from dnsagent.resolver import (
     ExtendedResolver, TCPExtendedResolver, ParallelResolver, ChainedResolver,
     DualResolver, HostsResolver, CachingResolver, CnResolver,
 )
-from dnsagent.server import MyDNSServerFactory
+from dnsagent.server import ExtendedDNSServerFactory
 from dnsagent.socks import SocksProxy
 from dnsagent.utils import parse_url
 
@@ -85,7 +85,7 @@ def cache(resolver):
 
 
 def _make_server(resolver, *, timeout=None):
-    return MyDNSServerFactory(resolver=resolver, resolve_timeout=timeout)
+    return ExtendedDNSServerFactory(resolver=resolver, resolve_timeout=timeout)
 
 
 def server(resolver, *, port=None, interface=None, binds=None, timeout=None) -> ServerInfo:

@@ -10,12 +10,12 @@ from dnsagent.resolver.bugfix import BugFixResolver, BugFixDNSDatagramProtocol
 from dnsagent.resolver.extended import (
     ExtendedResolver, TCPExtendedResolver, ExtendedDNSDatagramProtocol,
 )
-from dnsagent.server import MyDNSServerFactory
+from dnsagent.server import BugFixDNSServerFactory
 from dnsagent.tests import BaseTestResolver, FakeResolver, iplist, FakeTransport
 from dnsagent.utils import get_reactor
 
 
-class LoseConnectionDNSServerFactory(MyDNSServerFactory):
+class LoseConnectionDNSServerFactory(BugFixDNSServerFactory):
     countdown = 100
 
     def sendReply(self, protocol, message, address):
@@ -174,7 +174,7 @@ class TestDNSDatagramProtocolResendsExpirationWithExtended(
     protocol_cls = ExtendedDNSDatagramProtocol
 
 
-class DropRequestDNSServerFactory(MyDNSServerFactory):
+class DropRequestDNSServerFactory(BugFixDNSServerFactory):
     drops = 1
 
     def sendReply(self, protocol, message, address):

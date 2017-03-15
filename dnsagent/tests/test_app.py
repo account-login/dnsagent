@@ -1,15 +1,12 @@
-import random
-
 import pytest
 from twisted.internet import defer
-from twisted.internet.error import CannotListenError
 from twisted.trial import unittest
 
 from dnsagent.app import App
 from dnsagent.utils import parse_url, ParsedURL, BadURL
 from dnsagent.config import parse_dns_server_string, DnsServerInfo
 from dnsagent.resolver import ExtendedResolver
-from dnsagent.server import MyDNSServerFactory
+from dnsagent.server import ExtendedDNSServerFactory
 from dnsagent.tests import iplist, FakeResolver, BaseTestResolver
 
 
@@ -76,7 +73,7 @@ class TestApp(BaseTestResolver):
         ).chainDeferred(final)
 
     def set_resolver(self, resolver):
-        server = MyDNSServerFactory(resolver=resolver)
+        server = ExtendedDNSServerFactory(resolver=resolver)
         app = App()
         self.apps.append(app)
         app.start((server, [self.server_addr]))

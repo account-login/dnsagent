@@ -6,10 +6,10 @@ from typing import Tuple, Sequence
 
 from twisted.internet.protocol import ServerFactory
 from twisted.internet import defer
-from twisted.names.dns import DNSDatagramProtocol
 from twisted.python.log import PythonLoggingObserver
 
 from dnsagent import logger
+from dnsagent.resolver.extended import ExtendedDNSDatagramProtocol
 from dnsagent.utils import watch_modification, get_reactor
 
 
@@ -24,6 +24,8 @@ def eval_config_file(filename):
 
 
 class App:
+    datagram_protocol = ExtendedDNSDatagramProtocol
+
     def __init__(self, reactor=None):
         self.reactor = get_reactor(reactor)
         self.ports = []
@@ -40,7 +42,7 @@ class App:
         factory, binds = server_info
         self.ports.clear()
         for interface, port in binds:
-            protocol = DNSDatagramProtocol(controller=factory, reactor=self.reactor)
+            protocol = self.datagram_protocol(controller=factory, reactor=self.reactor)
             self.ports.append(self._start_udp(port, protocol, interface))
             self.ports.append(self._start_tcp(port, factory, interface))
 

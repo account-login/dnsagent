@@ -13,7 +13,7 @@ from twisted.python.failure import Failure
 
 from dnsagent.app import App, init_log
 from dnsagent.resolver import HostsResolver, ExtendedResolver, TCPExtendedResolver
-from dnsagent.server import MyDNSServerFactory
+from dnsagent.server import ExtendedDNSServerFactory
 from dnsagent.utils import get_reactor, wait_for_tcp
 
 
@@ -55,7 +55,7 @@ def run_server(bind: Tuple[str, int]):
 
     mapping = dict((gen_host_name(i), gen_ip_address(i)) for i in range(10000))
     resolver = HostsResolver(mapping=mapping)
-    server = MyDNSServerFactory(resolver=resolver)
+    server = ExtendedDNSServerFactory(resolver=resolver)
 
     reactor = get_reactor()
     app = App(reactor=reactor)

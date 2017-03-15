@@ -5,12 +5,16 @@ from typing import Union, Type
 import pytest
 from twisted.internet.protocol import connectionDone
 from twisted.names import dns
+from twisted.python.failure import Failure
 from twisted.trial import unittest
 
+from dnsagent.app import App
+from dnsagent.resolver import ExtendedResolver, TCPExtendedResolver
 from dnsagent.resolver.extended import (
     OPTClientSubnetOption, BadOPTClientSubnetData, QueryList,
     ExtendedDNSProtocol, ExtendedDNSDatagramProtocol, EDNSMessage,
 )
+from dnsagent.server import ExtendedDNSServerFactory
 from dnsagent.tests import FakeTransport, FakeResolver
 
 
@@ -119,4 +123,50 @@ class TestExtendedDNSDatagramProtocol(BaseTestExtendedDNSXXXProtcol):
         self.proto.datagramReceived(msg.toStr(), ('2.3.4.5', 0x2345))
 
 
+class MessageLoggingDNSServerFactory(ExtendedDNSServerFactory):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.msg_logs = []
+
+    def handleQuery(self, message, protocol, address):
+        self.msg_logs.append(message)
+        return super().handleQuery(message, protocol, address)
+
+
+class BaseTestECSClientServer(unittest.TestCase):
+    resolver_cls = None     # type: Union[Type[ExtendedResolver], Type[TCPExtendedResolver]]
+    server_addr = ('127.0.0.56', 5656)
+
+    query = dns.Query(b'asdf', dns.A, dns.IN)
+    subnet = ip_network('1.2.3.0/24')
+    ecs_option = OPTClientSubnetOption.from_subnet(subnet)
+
+    def setUp(self):
+        self.server = MessageLoggingDNSServerFactory(resolver=FakeResolver())
+        self.app = App()
+        self.app.start((self.server, [self.server_addr]))
+
+        self.resolver = self.resolver_cls(servers=[self.server_addr])
+
+    def tearDown(self):
+        return self.app.stop()
+
+    def test_run(self):
+        def check_server(err):
+            assert isinstance(err, Failure)
+            assert self.server.msg_logs.pop().options == [self.ecs_option]
+
+        d = self.resolver.query(self.query, client_subnet=self.subnet)
+        return d.addBoth(check_server)
+
+
+class TestClientSubnetWithExtendedResolver(BaseTestECSClientServer):
+    resolver_cls = ExtendedResolver
+
+
+class TestClientSubnetWithTCPExtendedResolver(BaseTestECSClientServer):
+    resolver_cls = TCPExtendedResolver
+
+
 del BaseTestExtendedDNSXXXProtcol
+del BaseTestECSClientServer

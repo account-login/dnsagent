@@ -3,13 +3,22 @@ from twisted.names.server import DNSServerFactory
 from twisted.names import dns
 
 from dnsagent import logger
+from dnsagent.resolver.bugfix import BugFixDNSProtocol
+from dnsagent.resolver.extended import ExtendedDNSProtocol
 
 
-class MyDNSServerFactory(DNSServerFactory):
-    def __init__(self, resolver, resolve_timeout=None):
+class BugFixDNSServerFactory(DNSServerFactory):
+    """
+    Fixed bugs:
+        1. Timeout argument not set for query.
+    """
+
+    protocol = BugFixDNSProtocol
+
+    def __init__(self, resolver, resolve_timeout=(5,)):
         super().__init__(clients=[resolver])
         self.resolver = resolver    # overide ResolverChain set in super().__init__()
-        self.resolve_timeout = resolve_timeout or [5]
+        self.resolve_timeout = resolve_timeout
 
     def handleQuery(self, message, protocol, address):
         """
@@ -50,6 +59,7 @@ class MyDNSServerFactory(DNSServerFactory):
         logger.info('[%d]handleQuery(%r), from %s', request_id, message.queries[0], address)
 
         query = message.queries[0]
+        # FIXED:  timeout argument
         d = self.resolver.query(query, timeout=self.resolve_timeout, request_id=request_id)
         return d.addCallback(
             self.gotResolverResponse, protocol, message, address,
@@ -86,3 +96,7 @@ class MyDNSServerFactory(DNSServerFactory):
             (message.answers, message.authority, message.additional),
             (time.time() - message.timeReceived) * 1000,
         )
+
+
+class ExtendedDNSServerFactory(BugFixDNSServerFactory):
+    protocol = ExtendedDNSProtocol
