@@ -32,7 +32,14 @@ class FakeResolver(BaseResolver):
         self.delay = 0
         self.map = dict()
         self.msg_logs = []
+        self.query_logs = []
         self.reactor = get_reactor(reactor)
+
+    def query(self, query, timeout=None, **kwargs):
+        params = dict(query=query, timeout=timeout)
+        params.update(kwargs)
+        self.query_logs.append(params)
+        return super().query(query, timeout=timeout, **kwargs)
 
     def _lookup(self, name, cls, type_, timeout, **kwargs):
         def cleanup():

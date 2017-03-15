@@ -123,16 +123,6 @@ class TestExtendedDNSDatagramProtocol(BaseTestExtendedDNSXXXProtcol):
         self.proto.datagramReceived(msg.toStr(), ('2.3.4.5', 0x2345))
 
 
-class MessageLoggingDNSServerFactory(ExtendedDNSServerFactory):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.msg_logs = []
-
-    def handleQuery(self, message, protocol, address):
-        self.msg_logs.append(message)
-        return super().handleQuery(message, protocol, address)
-
-
 class BaseTestECSClientServer(unittest.TestCase):
     resolver_cls = None     # type: Union[Type[ExtendedResolver], Type[TCPExtendedResolver]]
     server_addr = ('127.0.0.56', 5656)
@@ -142,9 +132,10 @@ class BaseTestECSClientServer(unittest.TestCase):
     ecs_option = OPTClientSubnetOption.from_subnet(subnet)
 
     def setUp(self):
-        self.server = MessageLoggingDNSServerFactory(resolver=FakeResolver())
+        self.fake_resolver = FakeResolver()
+        server = ExtendedDNSServerFactory(resolver=self.fake_resolver)
         self.app = App()
-        self.app.start((self.server, [self.server_addr]))
+        self.app.start((server, [self.server_addr]))
 
         self.resolver = self.resolver_cls(servers=[self.server_addr])
 
@@ -154,7 +145,7 @@ class BaseTestECSClientServer(unittest.TestCase):
     def test_run(self):
         def check_server(err):
             assert isinstance(err, Failure)
-            assert self.server.msg_logs.pop().options == [self.ecs_option]
+            assert self.fake_resolver.query_logs.pop()['client_subnet'] == self.subnet
 
         d = self.resolver.query(self.query, client_subnet=self.subnet)
         return d.addBoth(check_server)

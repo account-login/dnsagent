@@ -4,7 +4,7 @@ from twisted.names import dns
 
 from dnsagent import logger
 from dnsagent.resolver.bugfix import BugFixDNSProtocol
-from dnsagent.resolver.extended import ExtendedDNSProtocol
+from dnsagent.resolver.extended import ExtendedDNSProtocol, EDNSMessage, OPTClientSubnetOption
 
 
 class BugFixDNSServerFactory(DNSServerFactory):
@@ -55,17 +55,17 @@ class BugFixDNSServerFactory(DNSServerFactory):
             the first query in C{message}.
         @rtype: L{Deferred<twisted.internet.defer.Deferred>}
         """
-        request_id = message.id
-        logger.info('[%d]handleQuery(%r), from %s', request_id, message.queries[0], address)
+        logger.info('[%d]handleQuery(%r), from %s', message.id, message.queries[0], address)
 
+        d = self.do_query_from_request_message(message)
+        d.addCallback(self.gotResolverResponse, protocol, message, address)
+        d.addErrback(self.gotResolverError, protocol, message, address)
+        return d
+
+    def do_query_from_request_message(self, message: dns.Message):
         query = message.queries[0]
         # FIXED:  timeout argument
-        d = self.resolver.query(query, timeout=self.resolve_timeout, request_id=request_id)
-        return d.addCallback(
-            self.gotResolverResponse, protocol, message, address,
-        ).addErrback(
-            self.gotResolverError, protocol, message, address,
-        )
+        return self.resolver.query(query, timeout=self.resolve_timeout, request_id=message.id)
 
     def sendReply(self, protocol, message, address):
         """
@@ -100,3 +100,15 @@ class BugFixDNSServerFactory(DNSServerFactory):
 
 class ExtendedDNSServerFactory(BugFixDNSServerFactory):
     protocol = ExtendedDNSProtocol
+
+    def do_query_from_request_message(self, message: EDNSMessage):
+        query = message.queries[0]
+        client_subnet = None
+        for option in message.options:
+            if option.code == OPTClientSubnetOption.CLIENT_SUBNET_OPTION_CODE:
+                client_subnet, scope_prefix = OPTClientSubnetOption.parse_data(option.data)
+        return self.resolver.query(
+            query, timeout=self.resolve_timeout, request_id=message.id,
+            client_subnet=client_subnet,
+        )
+
