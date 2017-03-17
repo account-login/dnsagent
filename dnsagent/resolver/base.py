@@ -1,7 +1,7 @@
 from twisted.internet import defer
 from twisted.names import dns
 from twisted.names.client import Resolver as OriginResolver
-from twisted.names.common import ResolverBase
+from twisted.names.common import ResolverBase as OriginBaseResolver
 from twisted.python.failure import Failure
 
 from dnsagent import logger
@@ -11,7 +11,7 @@ from dnsagent.utils import repr_short
 __all__ = ('BaseResolver', 'patch_resolver', 'PatchedOriginResolver')
 
 
-class BaseResolver(ResolverBase):
+class BaseResolver(OriginBaseResolver):
     """
     Add kwargs to query() method, so additional information
     can by passed to resolver and sub-resovler.
@@ -27,8 +27,8 @@ class BaseResolver(ResolverBase):
         else:
             return defer.maybeDeferred(method, query.name.name, timeout, **kwargs)
 
-    def _lookup(self, name, cls, type, timeout, **kwargs):
-        return defer.fail(NotImplementedError("ResolverBase._lookup"))
+    def _lookup(self, name, cls, type_, timeout, **kwargs):
+        return defer.fail(NotImplementedError("%s._lookup" % (type(self).__name__),))
 
     def lookupAddress(self, name, timeout=None, **kwargs):
         return self._lookup(name, dns.IN, dns.A, timeout=timeout, **kwargs)
@@ -112,8 +112,8 @@ def patch_resolver(cls):
 @patch_resolver
 class PatchedOriginResolver(OriginResolver):
     """Original twisted resolver with an additional **kwargs in query() and lookupXXX() method"""
-    def _lookup(self, name, cls, type, timeout, **kwargs):
-        return super()._lookup(name, cls, type, timeout=timeout)
+    def _lookup(self, name, cls, type_, timeout, **kwargs):
+        return super()._lookup(name, cls, type_, timeout=timeout)
 
     def __repr__(self):
         cls = self.__class__.__name__

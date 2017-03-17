@@ -99,6 +99,7 @@ class BugFixDNSServerFactory(DNSServerFactory):
 
 
 class ExtendedDNSServerFactory(BugFixDNSServerFactory):
+    # TODO: respond with edns message
     protocol = ExtendedDNSProtocol
 
     def do_query_from_request_message(self, message: EDNSMessage):

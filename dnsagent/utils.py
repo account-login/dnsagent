@@ -129,9 +129,11 @@ def _parse_host(string: str, scheme=None) -> Tuple[str, str]:
 
 def repr_short(obj):
     try:
-        return obj._repr_short_()
+        method = obj._repr_short_
     except AttributeError:
         return repr(obj)
+    else:
+        return method()
 
 
 def wait_for_tcp(addr: Tuple[str, int], retries=20, timeout=0.2, d=None, logger=None):
