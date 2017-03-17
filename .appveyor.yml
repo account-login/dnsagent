@@ -5,7 +5,7 @@ environment:
     - PYTHON: "C:\\Python34"
     - PYTHON: "C:\\Python35"
     - PYTHON: "C:\\Python36"
-    - PYTHON: "C:\\Python34-x64"
+    # - PYTHON: "C:\\Python34-x64"
     - PYTHON: "C:\\Python35-x64"
     - PYTHON: "C:\\Python36-x64"
   PATH: "%PYTHON%;%PYTHON%\\scripts;%PATH%"
@@ -27,5 +27,4 @@ on_success:
   - cmd < benchmark.sh
 
 artifacts:
-  - path: 'dist\*.tar.gz'
-  - path: 'dist\*.whl'
+  - path: 'dist\*'

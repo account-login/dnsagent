@@ -111,4 +111,3 @@ class ExtendedDNSServerFactory(BugFixDNSServerFactory):
             query, timeout=self.resolve_timeout, request_id=message.id,
             client_subnet=client_subnet,
         )
-
