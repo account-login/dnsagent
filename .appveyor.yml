@@ -14,9 +14,8 @@ install:
   # We need wheel installed to build wheels
   - pip install wheel
   - pip install -r requirements_travis.txt
-  - pip install pypiwin32     # XXX: workaround to twisted dependancy bug
   - python setup.py sdist bdist_wheel
-  - pip install .
+  - pip install .[windows]
 
 build: off
 
