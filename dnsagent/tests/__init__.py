@@ -119,7 +119,7 @@ class BaseTestResolver(unittest.TestCase):
             assert [rrheader_to_ip(rr) for rr in ans] == expect
 
         def failed(failure: Failure):
-            logger.info('query %r failed: %r', query, failure)
+            logger.info('query %r failed: %s', query, failure)
             if not fail:
                 self.fail('query failed unexpectly')
             if isinstance(fail, type) and issubclass(fail, Exception):
