@@ -1,7 +1,6 @@
 # TODO: round robin
 # TODO: recursive resolver
-# TODO: edns client subnet: policy, caching, server responds
-# TODO: dns over https, https://developers.google.com/speed/public-dns/docs/dns-over-https
+# TODO: edns client subnet: policy, caching, server response
 # TODO: statistics
 # TODO: persistant tcp connection
 # TODO: dispaching based on input
@@ -16,4 +15,5 @@ from dnsagent.resolver.cn import *
 from dnsagent.resolver.dual import *
 from dnsagent.resolver.extended import *
 from dnsagent.resolver.hosts import *
+from dnsagent.resolver.https import *
 from dnsagent.resolver.parallel import *
