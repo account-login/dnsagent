@@ -1,7 +1,6 @@
 import urllib.parse
 from typing import Dict, List
 
-import treq
 from twisted.internet import defer
 from twisted.names import dns
 
@@ -26,8 +25,10 @@ class BadRData(Exception):
 class HTTPSResolver(BaseResolver):
     API_BASE_URL = 'https://dns.google.com/resolve'
 
-    def __init__(self, http_client=treq):
+    def __init__(self, http_client=None):
         super().__init__()
+        if http_client is None:
+            import treq as http_client
         self.http_client = http_client
 
     def _lookup(self, name: bytes, cls, type_, timeout, **kwargs):
@@ -36,6 +37,9 @@ class HTTPSResolver(BaseResolver):
 
     def make_request(self, name: bytes, cls, type_, timeout, **kwargs):
         def got_response(response, handler_d):
+            # NOTE: treq is lazy imported
+            # since importing treq will install reactor
+            import treq
             treq.json_content(response).chainDeferred(handler_d)
 
         url = self.make_request_url(name, cls, type_, **kwargs)
