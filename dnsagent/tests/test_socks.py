@@ -905,25 +905,25 @@ class TestTCPRelayConnector(unittest.TestCase):
         assert self.connector.ctrl_proto.transport is self.connector.user_proto.transport is None
 
 
-class BaseTestTCPRelayConnectorIntegrated(unittest.TestCase):
+class BaseTestSocksProxyTCP(unittest.TestCase):
     service_host = '127.0.0.100'
     service_port = 10000
 
-    server_host = '127.0.0.200'
-    server_port = 20000
+    socks_host = '127.0.0.200'
+    socks_port = 20000
 
     def setUp(self):
         self.reactor = get_reactor()
 
         return defer.DeferredList([
             self.setup_service(),
-            self.setup_server(),
+            self.setup_socks(),
         ], fireOnOneErrback=True)
 
     def tearDown(self):
         return defer.DeferredList([
             defer.maybeDeferred(self.teardown_service),
-            defer.maybeDeferred(self.teardown_server),
+            defer.maybeDeferred(self.teardown_socks),
         ], fireOnOneErrback=True)
 
     def _listen_protocol(self, protocol: Protocol, host: str, port: int, name: str):
@@ -950,10 +950,10 @@ class BaseTestTCPRelayConnectorIntegrated(unittest.TestCase):
             defer.maybeDeferred(self.service_proto.transport.loseConnection)
         ], fireOnOneErrback=True)
 
-    def setup_server(self):
+    def setup_socks(self):
         raise NotImplementedError
 
-    def teardown_server(self):
+    def teardown_socks(self):
         raise NotImplementedError
 
     def test_run(self):
@@ -964,7 +964,7 @@ class BaseTestTCPRelayConnectorIntegrated(unittest.TestCase):
                 connector.disconnect()
 
         proto = TCPGreeter()
-        proxy = SocksProxy(self.server_host, self.server_port, reactor=self.reactor)
+        proxy = SocksProxy(self.socks_host, self.socks_port, reactor=self.reactor)
         connector = self._connect_client_factory(
             proxy, self.service_host, self.service_port, OneshotClientFactory(proto),
         )
@@ -976,25 +976,25 @@ class BaseTestTCPRelayConnectorIntegrated(unittest.TestCase):
         return proxy.connectTCP(host, port, factory)
 
 
-class TestTCPRelayConnectorWithFakeServer(BaseTestTCPRelayConnectorIntegrated):
-    def setup_server(self):
+class TestSocksProxyTCPWithFakeServer(BaseTestSocksProxyTCP):
+    def setup_socks(self):
         proto = FakeSocks5ControlServerProtocol(('0.0.0.0', 1234), reactor=self.reactor)
-        return self._listen_protocol(proto, self.server_host, self.server_port, 'server')
+        return self._listen_protocol(proto, self.socks_host, self.socks_port, 'socks')
 
-    def teardown_server(self):
-        return self.server_transport.stopListening()
+    def teardown_socks(self):
+        return self.socks_transport.stopListening()
 
 
-class TestTCPRelayConnectorWithSS(BaseTestTCPRelayConnectorIntegrated):
-    def setup_server(self):
-        self.server_host, self.server_port = SSRunner.ss_client_host, SSRunner.ss_client_port
+class TestSocksProxyTCPWithSS(BaseTestSocksProxyTCP):
+    def setup_socks(self):
+        self.socks_host, self.socks_port = SSRunner.ss_client_host, SSRunner.ss_client_port
         return SSRunner.start()
 
-    def teardown_server(self):
+    def teardown_socks(self):
         pass
 
 
-class TestConnectSSL(TestTCPRelayConnectorWithSS):
+class TestSocksProxyConnectSSL(TestSocksProxyTCPWithSS):
     ssl_ctx_factory = None
 
     def _get_server_endpoint(self, host, port):
@@ -1015,4 +1015,4 @@ def tearDownModule():
 
 
 del BaseTestUDPRelayIntegrated
-del BaseTestTCPRelayConnectorIntegrated
+del BaseTestSocksProxyTCP
