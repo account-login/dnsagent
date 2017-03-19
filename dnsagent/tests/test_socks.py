@@ -1,4 +1,5 @@
 import logging
+import os
 import struct
 import subprocess
 from io import BytesIO
@@ -7,12 +8,16 @@ from ipaddress import ip_address
 import pytest
 from twisted.internet import address as taddress
 from twisted.internet import defer
-from twisted.internet.endpoints import TCP4ClientEndpoint, TCP4ServerEndpoint, connectProtocol
+from twisted.internet.endpoints import (
+    TCP4ClientEndpoint, TCP4ServerEndpoint, SSL4ServerEndpoint, connectProtocol,
+)
 from twisted.internet.error import CannotListenError
 from twisted.internet.protocol import (
     DatagramProtocol, Protocol, ServerFactory, connectionDone, ClientFactory,
 )
+from twisted.internet.ssl import DefaultOpenSSLContextFactory
 from twisted.python.failure import Failure
+from twisted.python.modules import getModule
 from twisted.trial import unittest
 
 from dnsagent.app import App
@@ -927,10 +932,13 @@ class BaseTestTCPRelayConnectorIntegrated(unittest.TestCase):
             return transport
 
         setattr(self, name + '_proto', protocol)
-        endpoint = TCP4ServerEndpoint(self.reactor, port, interface=host)
+        endpoint = self._get_server_endpoint(host, port)
         d = endpoint.listen(OneshotServerFactory(protocol))
         d.addCallback(got_transport)
         return d
+
+    def _get_server_endpoint(self, host, port):
+        return TCP4ServerEndpoint(self.reactor, port, interface=host)
 
     def setup_service(self):
         proto = TCPReverser()
@@ -957,12 +965,15 @@ class BaseTestTCPRelayConnectorIntegrated(unittest.TestCase):
 
         proto = TCPGreeter()
         proxy = SocksProxy(self.server_host, self.server_port, reactor=self.reactor)
-        connector = proxy.connectTCP(
-            self.service_host, self.service_port, OneshotClientFactory(proto),
+        connector = self._connect_client_factory(
+            proxy, self.service_host, self.service_port, OneshotClientFactory(proto),
         )
 
         proto.d.addCallback(got_reply)
         return proto.d
+
+    def _connect_client_factory(self, proxy: SocksProxy, host, port, factory):
+        return proxy.connectTCP(host, port, factory)
 
 
 class TestTCPRelayConnectorWithFakeServer(BaseTestTCPRelayConnectorIntegrated):
@@ -981,6 +992,21 @@ class TestTCPRelayConnectorWithSS(BaseTestTCPRelayConnectorIntegrated):
 
     def teardown_server(self):
         pass
+
+
+class TestConnectSSL(TestTCPRelayConnectorWithSS):
+    ssl_ctx_factory = None
+
+    def _get_server_endpoint(self, host, port):
+        module_dir = getModule(__name__).filePath.dirname()
+        self.ssl_ctx_factory = DefaultOpenSSLContextFactory(
+            os.path.join(module_dir, 'privkey.pem'),
+            os.path.join(module_dir, 'cacert.pem'),
+        )
+        return SSL4ServerEndpoint(self.reactor, port, self.ssl_ctx_factory, interface=host)
+
+    def _connect_client_factory(self, proxy: SocksProxy, host, port, factory):
+        return proxy.connectSSL(host, port, factory, self.ssl_ctx_factory)
 
 
 def tearDownModule():

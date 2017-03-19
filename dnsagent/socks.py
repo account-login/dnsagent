@@ -10,7 +10,7 @@ from twisted.internet import defer
 from twisted.internet.endpoints import connectProtocol
 from twisted.internet.error import MessageLengthError, CannotListenError
 from twisted.internet.interfaces import (
-    IListeningPort, IUDPTransport, IReactorUDP, IReactorTCP, IConnector,
+    IListeningPort, IUDPTransport, IReactorUDP, IReactorTCP, IConnector, IReactorSSL,
 )
 from twisted.internet.protocol import DatagramProtocol, Protocol, connectionDone, ClientFactory
 from twisted.python.failure import Failure
@@ -453,6 +453,7 @@ class TCPRelayConnector:
             self._disconnect_control_protocol()
 
     def disconnect(self):
+        # BUG: ssl not disconnected cleanly
         if self.state == 'connecting':
             self.stopConnecting()
         elif self.state == 'connected':
@@ -471,8 +472,8 @@ class TCPRelayConnector:
 
     def _disconnect_user_protocol(self, reason=connectionDone):
         if self.user_proto and self.user_proto.transport:
-            self.user_proto.transport = None
             self.user_proto.connectionLost(reason)
+            self.user_proto.transport = None
 
 
 class BadSocks5Reply(Exception):
@@ -662,7 +663,7 @@ class Socks5ControlProtocol(Protocol):
                 break
 
 
-@implementer(IReactorTCP)
+@implementer(IReactorTCP, IReactorSSL)
 class SocksProxy:
     def __init__(self, host: str, port: int, reactor=None):
         self.host, self.port = host, port
@@ -697,4 +698,16 @@ class SocksProxy:
         return connector
 
     def listenTCP(self, port, factory, backlog=50, interface=''):
+        raise NotImplementedError
+
+    def connectSSL(self, host, port, factory, contextFactory, timeout=30, bindAddress=None):
+        try:
+            from twisted.protocols import tls
+        except ImportError:
+            raise NotImplementedError
+        else:
+            tls_factory = tls.TLSMemoryBIOFactory(contextFactory, True, factory)
+            return self.connectTCP(host, port, tls_factory, timeout, bindAddress)
+
+    def listenSSL(self, port, factory, contextFactory, backlog=50, interface=''):
         raise NotImplementedError
