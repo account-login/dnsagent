@@ -10,7 +10,7 @@ from twisted.web.resource import Resource
 from twisted.web.server import Site
 
 from dnsagent.resolver.https import HTTPSResolver, BadRData
-from dnsagent.tests import make_rrheader, BaseTestResolver, iplist
+from dnsagent.tests import make_rrheader, BaseTestResolver, iplist, clean_treq_connection_pool
 from dnsagent.utils import get_reactor
 
 
@@ -230,11 +230,10 @@ class TestIntegration(BaseTestResolver):
 
     def tearDown(self):
         def cleanup(ignore):
-            import treq._utils
             return defer.DeferredList([
                 defer.maybeDeferred(self.server_transport.stopListening),
                 # XXX: hacks to clean delayed call
-                treq._utils.get_global_pool().closeCachedConnections(),
+                clean_treq_connection_pool(),
             ], fireOnOneErrback=True).chainDeferred(final_d)
 
         final_d = defer.Deferred()

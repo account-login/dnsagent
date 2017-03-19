@@ -1,8 +1,12 @@
+import os
+
 import pytest
+import treq
 from twisted.trial import unittest
 
 from dnsagent.config import parse_dns_server_string, DnsServerInfo
-from dnsagent.utils import BadURL, parse_url, ParsedURL
+from dnsagent.tests import clean_treq_connection_pool
+from dnsagent.utils import BadURL, parse_url, ParsedURL, patch_twisted_bugs
 
 
 class BaseTestParseURL(unittest.TestCase):
@@ -48,6 +52,24 @@ class TestParseDnsServerString(BaseTestParseURL):
 
     def good(self, string: str, scheme='udp', host=None, port=53):
         return super().good(string, scheme, host, port)
+
+
+@pytest.mark.skipif(os.environ.get('NO_INTERNET'), reason='internet required')
+class TestTwistedSSLBug(unittest.TestCase):
+    """Windows only bug"""
+
+    def setUp(self):
+        patch_twisted_bugs()
+
+    def tearDown(self):
+        return clean_treq_connection_pool()
+
+    def test_run(self):
+        def check(text):
+            assert len(text) > 10
+
+        d = treq.get('https://example.com/')
+        return d.addCallback(treq.text_content).addCallback(check)
 
 
 del BaseTestParseURL

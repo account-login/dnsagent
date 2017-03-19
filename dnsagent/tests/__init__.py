@@ -254,3 +254,8 @@ class OneshotServerFactory(ServerFactory):
 
     def buildProtocol(self, addr):
         return self.proto
+
+
+def clean_treq_connection_pool():
+    import treq._utils
+    return treq._utils.get_global_pool().closeCachedConnections()

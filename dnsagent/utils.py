@@ -1,10 +1,13 @@
 from ipaddress import IPv4Address, IPv6Address, ip_address
+from itertools import chain
 import logging
 import os
 import re
 import socket
+import sys
 from typing import NamedTuple, Tuple
 
+from twisted.internet._sslverify import IOpenSSLTrustRoot, Certificate, platformTrust
 from twisted.internet import defer, address as taddress
 from twisted.internet.endpoints import (
     connectProtocol, TCP4ClientEndpoint, TCP6ClientEndpoint, HostnameEndpoint,
@@ -13,6 +16,10 @@ from twisted.internet.protocol import Protocol
 from twisted.names import dns
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
 from watchdog.observers import Observer
+from zope.interface import implementer
+
+
+logger = logging.getLogger(__name__)
 
 
 class WatcherHandler(FileSystemEventHandler):
@@ -196,3 +203,50 @@ def to_twisted_addr(host: str, port: int, type_='TCP'):
     else:
         assert isinstance(host, str)
         return taddress.HostnameAddress(host.encode(), port)
+
+
+@implementer(IOpenSSLTrustRoot)
+class OpenSSLWindowsCertificateAuthorities:
+    """
+    Use wincertstore package to interface with the Windows CA certificates.
+    """
+
+    def _addCACertsToContext(self, context):
+        from wincertstore import CertSystemStore
+        from OpenSSL.crypto import Error as OpenSSLError
+
+        store = context.get_cert_store()
+        certificates = chain.from_iterable(
+            CertSystemStore(name).itercerts()
+            for name in ('ROOT', 'CA', 'MY')
+        )
+        # use set to remove duplicates
+        encoded_certs = set(cert.get_encoded() for cert in certificates)
+        for encoded in encoded_certs:
+            try:
+                store.add_cert(Certificate.load(encoded).original)
+            except OpenSSLError:
+                logger.exception('error in adding certificate to store')
+
+
+def patched_platform_trust():
+    """
+    Attempt to discover a set of trusted certificate authority certificates
+
+    @raise NotImplementedError: if this platform is not yet supported by Twisted. 
+        At present, only OpenSSL and native Windows trusted CA database is supported.
+    """
+    if sys.platform.lower().startswith('win'):
+        return OpenSSLWindowsCertificateAuthorities()
+    else:
+        return platformTrust()
+
+
+def patch_twisted_bugs():
+    """
+    Add native Windows trusted CA database support for SSL certificate validation
+    
+    from: https://twistedmatrix.com/trac/ticket/6371
+    """
+    import twisted.internet._sslverify as mod
+    mod.platformTrust = patched_platform_trust
