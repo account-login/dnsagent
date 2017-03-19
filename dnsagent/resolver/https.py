@@ -57,14 +57,6 @@ class HTTPSResolver(BaseResolver):
 
     @staticmethod
     def split_rdata(string) -> List[str]:
-        def got_char(char: str):
-            nonlocal word
-            if in_quote or not char.isspace():
-                word += char
-            elif word:
-                ans.append(word)
-                word = ''
-
         in_quote = False
         escape = False
         ans = []
@@ -83,11 +75,18 @@ class HTTPSResolver(BaseResolver):
                     in_quote = False
                     continue
 
-            got_char(ch)
+            if in_quote or not ch.isspace():
+                word += ch
+            elif word:
+                ans.append(word)
+                word = ''
 
         if escape or in_quote:
             raise BadRData('escape=%r, in_quote=%r' % (escape, in_quote))
-        got_char(' ')   # append last word to ans
+
+        # append last word to ans
+        if word:
+            ans.append(word)
         return ans
 
     def decode_to_rrheader(self, entry: dict) -> dns.RRHeader:
