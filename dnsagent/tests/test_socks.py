@@ -731,10 +731,11 @@ class TestResolverOverSocks(TestUDPRelayWithSS):
         """this test is splited."""
 
 
-class TestableTCPRelayConnector(TCPRelayConnector):
-    def _connect_control_protocol(self, errback):
+class TCPRelayConnectorWithFakeTranport(TCPRelayConnector):
+    def _connect_control_protocol(self):
         assert self.ctrl_proto.transport is None
         self.ctrl_proto.makeConnection(FakeTransport(addr=self.proxy_addr))
+        return defer.succeed(self.ctrl_proto)
 
 
 class FakeClientFactory(ClientFactory):
@@ -781,7 +782,7 @@ class ReconnectingFakeClientFactory(FakeClientFactory):
 class TestTCPRelayConnector(unittest.TestCase):
     def setUp(self):
         self.factory = FakeClientFactory()
-        self.connector = TestableTCPRelayConnector(
+        self.connector = TCPRelayConnectorWithFakeTranport(
             '1.2.3.4', 1234, self.factory, ('4.3.2.1', 4321),
         )
 
@@ -867,7 +868,7 @@ class TestTCPRelayConnector(unittest.TestCase):
 
     def test_reconnecting_from_client_factory(self):
         self.factory = ReconnectingFakeClientFactory()
-        self.connector = TestableTCPRelayConnector(
+        self.connector = TCPRelayConnectorWithFakeTranport(
             '1.2.3.4', 1234, self.factory, ('4.3.2.1', 4321),
         )
         self.connector.connect()

@@ -403,7 +403,7 @@ class TCPRelayConnector:
             self.state = 'disconnected'
 
             if self.ctrl_proto.transport is not None:
-                self._disconnect_control_protocol() # triggers self.connection_lost()
+                self._disconnect_control_protocol()     # triggers self.connection_lost()
 
             self.factory.clientConnectionFailed(self, failure)
             if self.state == 'disconnected':
@@ -422,15 +422,15 @@ class TCPRelayConnector:
             self.ctrl_proto = Socks5ControlProtocol()
             self.ctrl_proto.connector = self
             self.ctrl_proto.auth_defer.addCallbacks(authed, failed)
-            self._connect_control_protocol(failed)
+            self._connect_control_protocol().addErrback(failed)
         else:
             logger.debug('%r.buildProtocol(%r) returns None', self.factory, addr)
 
-    def _connect_control_protocol(self, errback):
+    def _connect_control_protocol(self):
         """this method exists for test purpose."""
         proxy_endpoint = get_client_endpoint(self.reactor, self.proxy_addr)
         self.ctrl_connect_d = connectProtocol(proxy_endpoint, self.ctrl_proto)
-        self.ctrl_connect_d.addErrback(errback)
+        return self.ctrl_connect_d
 
     def connection_lost(self, failure):
         if self.state == 'connected':   # preventing called from connecting/disconnected state
