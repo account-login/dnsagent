@@ -1,11 +1,9 @@
-import os
-
 import pytest
 import treq
 from twisted.trial import unittest
 
 from dnsagent.config import parse_dns_server_string, DnsServerInfo
-from dnsagent.tests import clean_treq_connection_pool
+from dnsagent.tests import clean_treq_connection_pool, require_internet
 from dnsagent.utils import BadURL, parse_url, ParsedURL, patch_twisted_bugs
 
 
@@ -54,7 +52,7 @@ class TestParseDnsServerString(BaseTestParseURL):
         return super().good(string, scheme, host, port)
 
 
-@pytest.mark.skipif(os.environ.get('NO_INTERNET'), reason='internet required')
+@require_internet
 class TestTwistedSSLBug(unittest.TestCase):
     """Windows only bug"""
 

@@ -1,7 +1,9 @@
 from ipaddress import ip_address, IPv4Address, IPv6Address
 import logging
+import os
 from typing import Tuple, Sequence
 
+import pytest
 from twisted.internet.protocol import (
     DatagramProtocol, Protocol, connectionDone, ServerFactory, ClientFactory,
 )
@@ -20,6 +22,15 @@ logger = logging.getLogger(__name__)
 
 init_log()
 enable_log()
+
+
+NO_INTERNET = os.environ.get('NO_INTERNET')
+
+
+def require_internet(test_cls_or_func):
+    """Skip tests that require internet connection."""
+    marker = pytest.mark.skipif(NO_INTERNET, reason='requires internet')
+    return marker(test_cls_or_func)
 
 
 def iplist(*lst):
