@@ -6,8 +6,8 @@ from io import BytesIO
 from ipaddress import ip_address
 
 import pytest
-from twisted.internet import address as taddress
-from twisted.internet import defer
+import treq
+from twisted.internet import address as taddress, defer, ssl
 from twisted.internet.endpoints import (
     TCP4ClientEndpoint, TCP4ServerEndpoint, SSL4ServerEndpoint, connectProtocol,
 )
@@ -15,18 +15,21 @@ from twisted.internet.error import CannotListenError
 from twisted.internet.protocol import (
     DatagramProtocol, Protocol, ServerFactory, connectionDone, ClientFactory,
 )
-from twisted.internet.ssl import DefaultOpenSSLContextFactory
 from twisted.python.failure import Failure
 from twisted.python.modules import getModule
 from twisted.trial import unittest
+from twisted.web.client import Agent, BrowserLikePolicyForHTTPS
+from twisted.web.resource import Resource
+from twisted.web.server import Site
 
 from dnsagent.app import App
+from dnsagent.resolver import HostsResolver
 from dnsagent.resolver.extended import ExtendedResolver, TCPExtendedResolver
 from dnsagent.socks import (
     read_socks_host, encode_socks_host, SocksHost, BadSocksHost, InsufficientData,
     Socks5Reply, BadSocks5Reply,
     UDPRelayPacket, BadUDPRelayPacket, UDPRelayProtocol, UDPRelayTransport, UDPRelay,
-    Socks5ControlProtocol, Socks5Cmd, SocksProxy, TCPRelayConnector,
+    Socks5ControlProtocol, Socks5Cmd, TCPRelayConnector, SocksProxy, SocksWrappedReactor,
 )
 from dnsagent.tests import (
     FakeTransport, FakeDatagramProtocol, FakeProtocol,
@@ -907,8 +910,8 @@ class TestTCPRelayConnector(unittest.TestCase):
 
 
 class BaseTestSocksProxyTCP(unittest.TestCase):
-    service_host = '127.0.0.100'
-    service_port = 10000
+    service_host = '127.0.0.1'
+    service_port = 10111
 
     socks_host = '127.0.0.200'
     socks_port = 20000
@@ -941,15 +944,15 @@ class BaseTestSocksProxyTCP(unittest.TestCase):
     def _get_server_endpoint(self, host, port):
         return TCP4ServerEndpoint(self.reactor, port, interface=host)
 
-    def setup_service(self):
-        proto = TCPReverser()
-        return self._listen_protocol(proto, self.service_host, self.service_port, 'service')
+    def setup_service(self, protocol: Protocol = None):
+        protocol = protocol or TCPReverser()
+        return self._listen_protocol(protocol, self.service_host, self.service_port, 'service')
 
     def teardown_service(self):
-        return defer.DeferredList([
-            defer.maybeDeferred(self.service_transport.stopListening),
-            defer.maybeDeferred(self.service_proto.transport.loseConnection)
-        ], fireOnOneErrback=True)
+        dl = [defer.maybeDeferred(self.service_transport.stopListening)]
+        if getattr(self.service_proto, 'transport', None):
+            dl.append(defer.maybeDeferred(self.service_proto.transport.loseConnection))
+        return defer.DeferredList(dl, fireOnOneErrback=True)
 
     def setup_socks(self):
         raise NotImplementedError
@@ -996,18 +999,82 @@ class TestSocksProxyTCPWithSS(BaseTestSocksProxyTCP):
 
 
 class TestSocksProxyConnectSSL(TestSocksProxyTCPWithSS):
-    ssl_ctx_factory = None
+    _module_dir = getModule(__name__).filePath.dirname()
+    key_path = os.path.join(_module_dir, 'privkey.pem')
+    ca_path = os.path.join(_module_dir, 'cacert.pem')
+    ssl_ctx_factory = ssl.DefaultOpenSSLContextFactory(key_path, ca_path)
 
     def _get_server_endpoint(self, host, port):
-        module_dir = getModule(__name__).filePath.dirname()
-        self.ssl_ctx_factory = DefaultOpenSSLContextFactory(
-            os.path.join(module_dir, 'privkey.pem'),
-            os.path.join(module_dir, 'cacert.pem'),
-        )
         return SSL4ServerEndpoint(self.reactor, port, self.ssl_ctx_factory, interface=host)
 
     def _connect_client_factory(self, proxy: SocksProxy, host, port, factory):
         return proxy.connectSSL(host, port, factory, self.ssl_ctx_factory)
+
+
+class WebResource(Resource):
+    isLeaf = True
+
+    def render_GET(self, request):
+        return b'hello'
+
+
+class ProtocolTracedSite(Site):
+    _protocols = []
+
+    def buildProtocol(self, addr):
+        proto = super().buildProtocol(addr)
+        self._protocols.append(proto)
+        return proto
+
+
+class TestSocksProxyWithTreq(TestSocksProxyConnectSSL):
+    def setUp(self):
+        from twisted.internet._sslverify import OpenSSLCertificateAuthorities
+
+        with open(self.ca_path, 'rb') as fp:
+            cacert = ssl.Certificate.loadPEM(fp.read()).original
+        trust_root = OpenSSLCertificateAuthorities([cacert])
+        self.https_policy = BrowserLikePolicyForHTTPS(trust_root)
+
+        return super().setUp()
+
+    def setup_service(self, protocol=None):
+        def got_transport(transport):
+            self.service_transport = transport
+            return transport
+
+        endpoint = self._get_server_endpoint(self.service_host, self.service_port)
+        site = ProtocolTracedSite(WebResource())
+        self.service_protocols = site._protocols
+        d = endpoint.listen(site)
+        d.addCallback(got_transport)
+        return d
+
+    def teardown_service(self):
+        assert len(self.service_protocols) == 1
+        self.service_proto = self.service_protocols.pop()
+        return super().teardown_service()
+
+    def test_run(self):
+        def check(text: str):
+            assert text == 'hello'
+
+        def restore_resolver(ignore):
+            self.reactor.installResolver(origin_resolver)
+            return ignore
+
+        hostname = 'dnsagent.test'
+        resolver = HostsResolver(mapping={hostname: self.service_host})
+        origin_resolver = self.reactor.installResolver(resolver)
+
+        url = 'https://%s:%d/' % (hostname, self.service_port)
+        proxy = SocksWrappedReactor(self.socks_host, self.socks_port, reactor=self.reactor)
+        agent = Agent(reactor=proxy, contextFactory=self.https_policy)
+        d = treq.get(url, agent=agent)
+        d.addCallback(treq.text_content)
+        d.addCallback(check)
+        d.addBoth(restore_resolver)
+        return d
 
 
 def tearDownModule():

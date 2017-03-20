@@ -6,7 +6,7 @@ from io import BytesIO
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from typing import NamedTuple, Union, Optional, Tuple
 
-from twisted.internet import defer
+from twisted.internet import defer, ssl
 from twisted.internet.endpoints import connectProtocol
 from twisted.internet.error import MessageLengthError, CannotListenError
 from twisted.internet.interfaces import (
@@ -181,6 +181,7 @@ class UDPRelayProtocol(DatagramProtocol):
         self.user_protocol = proto
 
 
+# noinspection PyPep8Naming
 @implementer(IListeningPort, IUDPTransport)
 class UDPRelayTransport:
     def __init__(
@@ -283,6 +284,7 @@ class UDPRelayTransport:
         return False
 
 
+# noinspection PyPep8Naming
 @implementer(IReactorUDP)
 class UDPRelay:
     def __init__(self, ctrl_protocol: 'Socks5ControlProtocol', reactor=None):
@@ -371,6 +373,7 @@ class UDPRelay:
         return self._stop_defer
 
 
+# noinspection PyPep8Naming
 @implementer(IConnector)
 class TCPRelayConnector:
     def __init__(
@@ -663,6 +666,7 @@ class Socks5ControlProtocol(Protocol):
                 break
 
 
+# noinspection PyPep8Naming
 @implementer(IReactorTCP, IReactorSSL)
 class SocksProxy:
     def __init__(self, host: str, port: int, reactor=None):
@@ -700,7 +704,10 @@ class SocksProxy:
     def listenTCP(self, port, factory, backlog=50, interface=''):
         raise NotImplementedError
 
-    def connectSSL(self, host, port, factory, contextFactory, timeout=30, bindAddress=None):
+    def connectSSL(
+            self, host: str, port: int, factory: ClientFactory,
+            contextFactory: ssl.ClientContextFactory, timeout=30, bindAddress=None
+    ):
         try:
             from twisted.protocols import tls
         except ImportError:
@@ -711,3 +718,35 @@ class SocksProxy:
 
     def listenSSL(self, port, factory, contextFactory, backlog=50, interface=''):
         raise NotImplementedError
+
+
+# noinspection PyPep8Naming
+@implementer(IReactorTCP, IReactorSSL)
+class SocksWrappedReactor:
+    def __init__(self, proxy_host: str, proxy_port: int, reactor=None):
+        self.__reactor = get_reactor(reactor)
+        self.__socks_proxy = SocksProxy(proxy_host, proxy_port, reactor=self.__reactor)
+
+    def __getattr__(self, item):
+        return getattr(self.__reactor, item)
+
+    def connectTCP(
+            self, host: str, port: int, factory: ClientFactory,
+            timeout=30, bindAddress=None
+    ):
+        return self.__socks_proxy.connectTCP(
+            host, port, factory,
+            timeout=timeout, bindAddress=bindAddress,
+        )
+
+    def connectSSL(
+            self, host: str, port: int, factory: ClientFactory,
+            contextFactory: ssl.ClientContextFactory, timeout=30, bindAddress=None
+    ):
+        return self.__socks_proxy.connectSSL(
+            host, port, factory, contextFactory,
+            timeout=timeout, bindAddress=bindAddress,
+        )
+
+    def listenUDP(self, port, protocol, interface='', maxPacketSize=8192):
+        raise NotImplementedError('please use SocksProxy.get_udp_relay()')
