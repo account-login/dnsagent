@@ -17,7 +17,7 @@ from dnsagent.tests import (
     make_rrheader, BaseTestResolver, iplist, clean_treq_connection_pool,
     require_internet, SSRunner,
 )
-from dnsagent.utils import get_reactor, rrheader_to_ip
+from dnsagent.utils import get_reactor, rrheader_to_ip, chain_deferred_call
 
 
 def test_split_rdata():
@@ -236,17 +236,14 @@ class TestHTTPSResolverWithLocalServer(BaseTestResolver):
         self.server_transport = reactor.listenTCP(port, site, interface=host)
 
     def tearDown(self):
-        def cleanup(ignore):
-            return defer.DeferredList([
+        return chain_deferred_call([
+            super().tearDown,
+            lambda: defer.DeferredList([
                 defer.maybeDeferred(self.server_transport.stopListening),
                 # XXX: hacks to clean delayed call
                 clean_treq_connection_pool(),
-            ], fireOnOneErrback=True).chainDeferred(final_d)
-
-        final_d = defer.Deferred()
-        d = super().tearDown()
-        d.addCallback(cleanup).addErrback(final_d.errback)
-        return final_d
+            ], fireOnOneErrback=True),
+        ])
 
     def test_run(self):
         self.check_a('apple.com', iplist('17.178.96.59'))
@@ -270,11 +267,10 @@ class TestHTTPSResolverWithGoogle(BaseTestResolver):
         return d
 
     def tearDown(self):
-        final_d = defer.Deferred()
-        d = super().tearDown()
-        d.addCallback(lambda ignore: clean_treq_connection_pool().chainDeferred(final_d))
-        d.addErrback(final_d.errback)
-        return final_d
+        return chain_deferred_call([
+            super().tearDown,
+            clean_treq_connection_pool,
+        ])
 
     def run_test(self, subnet: str, country: str):
         def check(result):

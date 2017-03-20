@@ -77,7 +77,7 @@ class ParalledQueryHandler:
     def update_results(self, result, index: int):
         if isinstance(result, Failure):
             if isinstance(result.value, defer.CancelledError):
-                verb = 'canceled'
+                verb = 'cancelled'
             else:
                 verb = 'failed'
         else:

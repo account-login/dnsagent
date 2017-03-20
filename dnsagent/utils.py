@@ -5,7 +5,7 @@ import os
 import re
 import socket
 import sys
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, Tuple, Sequence, Callable, Any, Union
 
 from twisted.internet._sslverify import IOpenSSLTrustRoot, Certificate, platformTrust
 from twisted.internet import defer, address as taddress
@@ -250,3 +250,30 @@ def patch_twisted_bugs():
     """
     import twisted.internet._sslverify as mod
     mod.platformTrust = patched_platform_trust
+
+
+# This is an unique object used to distinguish between None and unused argument
+_NONE = object()
+
+
+def chain_deferred_call(
+        funcs: Sequence[Callable], final_d: defer.Deferred = None, result=_NONE
+):
+    final_d = final_d or defer.Deferred()
+
+    if len(funcs) == 0:
+        if result is _NONE:
+            final_d.callback(None)
+        else:
+            final_d.callback(result)
+    else:
+        first, *remainds = funcs
+        if result is _NONE:
+            d = defer.maybeDeferred(first)
+            d.addCallback(lambda ignore: chain_deferred_call(remainds, final_d))
+        else:
+            d = defer.maybeDeferred(first, result)
+            d.addCallback(lambda result: chain_deferred_call(remainds, final_d, result))
+        d.addErrback(final_d.errback)
+
+    return final_d

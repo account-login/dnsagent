@@ -12,7 +12,7 @@ from dnsagent.resolver.extended import (
 )
 from dnsagent.server import BugFixDNSServerFactory
 from dnsagent.tests import BaseTestResolver, FakeResolver, iplist, FakeTransport
-from dnsagent.utils import get_reactor
+from dnsagent.utils import get_reactor, chain_deferred_call
 
 
 class LoseConnectionDNSServerFactory(BugFixDNSServerFactory):
@@ -52,12 +52,13 @@ class TestTCPBugFixResolver(BaseTestResolver):
         self.reactor = get_reactor()
 
     def tearDown(self):
-        def super_down(ignore):
-            self.app.stop().chainDeferred(d)
+        def super_super_down():
+            return self.app.stop()
 
-        d = defer.Deferred()
-        super().tearDown().addCallbacks(super_down, d.errback)
-        return d
+        return chain_deferred_call([
+            super().tearDown,
+            super_super_down,
+        ])
 
     def test_success(self):
         def check_waiting_state():

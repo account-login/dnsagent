@@ -1,22 +1,21 @@
-import subprocess
 from ipaddress import ip_address, IPv4Address, IPv6Address
 import logging
 import os
+import subprocess
 from typing import Tuple, Sequence
 
 import pytest
+from twisted.internet import defer
 from twisted.internet.protocol import (
     DatagramProtocol, Protocol, connectionDone, ServerFactory, ClientFactory,
 )
-from twisted.internet import defer
 from twisted.names import dns
 from twisted.python.failure import Failure
 from twisted.trial import unittest
 
 from dnsagent.app import init_log, enable_log
-from dnsagent.utils import rrheader_to_ip, get_reactor, to_twisted_addr, wait_for_tcp
 from dnsagent.resolver.base import BaseResolver
-
+from dnsagent.utils import rrheader_to_ip, get_reactor, to_twisted_addr, wait_for_tcp
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +37,7 @@ def iplist(*lst):
     return [ip_address(ip) for ip in lst]
 
 
+# noinspection PyPep8Naming
 class FakeResolver(BaseResolver):
     def __init__(self, reactor=None):
         super().__init__()
@@ -163,6 +163,7 @@ class BaseTestResolver(unittest.TestCase):
         )
 
 
+# noinspection PyPep8Naming
 class FakeTransport:
     def __init__(self, addr=('8.7.6.5', 8765)):
         self.write_logs = []

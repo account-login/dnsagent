@@ -37,7 +37,7 @@ from dnsagent.tests import (
     SSRunner,
 )
 from dnsagent.utils import (
-    rrheader_to_ip, get_reactor, get_client_endpoint, to_twisted_addr,
+    rrheader_to_ip, get_reactor, get_client_endpoint, to_twisted_addr, chain_deferred_call,
 )
 
 
@@ -332,24 +332,24 @@ class TestUDPRelay(unittest.TestCase):
         self.relay_defer.addBoth(set_result)
         self.relay_setup_result = None
 
+    def tearDown(self):
+        return self.relay.stop()
+
     def test_auth_failed(self):
         self.ctrl_proto.dataReceived(b'\5\xff')
         assert isinstance(self.relay_setup_result, Failure)
-        return self.relay.stop()
 
     def test_udp_associate_failed(self):
         self.ctrl_proto.dataReceived(b'\5\0')
         self.ctrl_proto.dataReceived(b'\5\x01\0\x01\2\3\4\5\x23\x45')
         assert not self.relay.relay_done
         assert isinstance(self.relay_setup_result, Failure)
-        return self.relay.stop()
 
     def test_udp_associate_success(self):
         self.ctrl_proto.dataReceived(b'\5\0')
         self.ctrl_proto.dataReceived(b'\5\0\0\x01\x7f\0\0\x08\x23\x45')
         assert self.relay.relay_done
         assert self.relay_setup_result == (ip_address('127.0.0.8'), 0x2345)
-        return self.relay.stop()
 
     def test_listenUDP(self):
         self.ctrl_proto.dataReceived(b'\5\0')
@@ -362,15 +362,11 @@ class TestUDPRelay(unittest.TestCase):
         assert self.relay.relay_proto.user_protocol is user_proto
         assert self.relay.listening_port is port
 
-        return self.relay.stop()
-
     def test_listenUDP_can_not_listen(self):
         for data in (b'', b'\5\0', b'\5\1\0\x01\2\3\4\5\x23\x45'):
             self.ctrl_proto.dataReceived(data)
             with pytest.raises(CannotListenError):
                 self.relay.listenUDP(0x1234, Greeter(('4.3.2.1', 0x4321)))
-
-        return self.relay.stop()
 
     def test_listenUDP_can_not_listen_more_than_once(self):
         self.ctrl_proto.dataReceived(b'\5\0')
@@ -378,8 +374,6 @@ class TestUDPRelay(unittest.TestCase):
         self.relay.listenUDP(0x1234, FakeDatagramProtocol())
         with pytest.raises(RuntimeError):
             self.relay.listenUDP(0x2345, FakeDatagramProtocol())
-
-        return self.relay.stop()
 
 
 class RelayProtocol(Protocol):
@@ -546,19 +540,20 @@ class BaseTestUDPRelayIntegrated(unittest.TestCase):
         raise NotImplementedError
 
     def setup_socks5_client(self):
-        def proxy_connected(ignore):
-            assert not isinstance(ignore, Failure)
+        def proxy_connected():
             self.relay = UDPRelay(self.ctrl_proto)
-            d = self.relay.setup_relay().addCallback(lambda ignore: self.relay)
-            d.chainDeferred(self.relay_done)
+            return self.relay.setup_relay().addCallback(lambda ignore: self.relay)
 
         self.relay_done = defer.Deferred()
         proxy_endpoint = TCP4ClientEndpoint(
             self.reactor, self.proxy_host, self.proxy_port,
         )
         self.ctrl_proto = Socks5ControlProtocol()
-        ctrl_connected = connectProtocol(proxy_endpoint, self.ctrl_proto)
-        ctrl_connected.addCallbacks(proxy_connected, self.relay_done.errback)
+
+        chain_deferred_call([
+            lambda: connectProtocol(proxy_endpoint, self.ctrl_proto),
+            proxy_connected,
+        ], self.relay_done)
 
     def tearDown(self):
         return self.relay.stop()
@@ -605,12 +600,10 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
     proxy_host, proxy_port = SSRunner.ss_client_host, SSRunner.ss_client_port
 
     def setUp(self):
-        d = defer.Deferred()
-        ss_d = SSRunner.start()
-        ss_d.addCallback(
-            lambda ignore: super(TestUDPRelayWithSS, self).setUp().chainDeferred(d)
-        ).addErrback(d.errback)
-        return d
+        return chain_deferred_call([
+            SSRunner.start,
+            super(TestUDPRelayWithSS, self).setUp,
+        ])
 
     def setup_socks5_server(self):
         pass

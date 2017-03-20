@@ -4,6 +4,7 @@ from dnsagent.app import App
 from dnsagent.resolver import ExtendedResolver
 from dnsagent.server import ExtendedDNSServerFactory
 from dnsagent.tests import iplist, FakeResolver, BaseTestResolver
+from dnsagent.utils import chain_deferred_call
 
 
 class TestApp(BaseTestResolver):
@@ -14,14 +15,12 @@ class TestApp(BaseTestResolver):
         self.apps = []
 
     def tearDown(self):
-        d = defer.Deferred()
-        super().tearDown().addCallbacks(lambda ignore: self.clean_apps(d), d.errback)
-        return d
-
-    def clean_apps(self, final: defer.Deferred):
-        return defer.DeferredList(
-            [ app.stop() for app in self.apps ], fireOnOneErrback=True,
-        ).chainDeferred(final)
+        return chain_deferred_call([
+            super().tearDown,
+            lambda: defer.DeferredList(
+                [app.stop() for app in self.apps], fireOnOneErrback=True,
+            ),
+        ])
 
     def set_resolver(self, resolver):
         server = ExtendedDNSServerFactory(resolver=resolver)

@@ -1,3 +1,4 @@
+import functools
 import math
 import socket
 import struct
@@ -16,6 +17,7 @@ from dnsagent.resolver.bugfix import (
     BugFixDNSProtocol, BugFixDNSDatagramProtocol, BugFixDNSClientFactory, BugFixResolver,
 )
 from dnsagent.socks import SocksProxy, UDPRelay
+from dnsagent.utils import chain_deferred_call
 
 
 __all__ = ('ExtendedResolver', 'TCPExtendedResolver')
@@ -334,25 +336,22 @@ class ExtendedResolver(ECSResolverMixin, BugFixResolver):
         super().__init__(resolv=resolv, servers=servers, timeout=timeout, reactor=reactor)
         self.socks_proxy = socks_proxy
 
-    def _got_udp_relay(self, relay: UDPRelay, query_d, *query_args):
+    def _got_udp_relay(self, relay: UDPRelay, query_args):
         def stop_relay(ignore):
             relay.stop()
             return ignore
 
         proto = ExtendedDNSDatagramProtocol(self, reactor=self._reactor)
         relay.listenUDP(0, proto, maxPacketSize=512)
-
-        proto.query(*query_args).chainDeferred(query_d)
-        query_d.addBoth(stop_relay)
+        return proto.query(*query_args).addBoth(stop_relay)
 
     def _query(self, *args):
         """Run UDP query"""
         if self.socks_proxy is not None:
-            d = defer.Deferred()
-            relay_d = self.socks_proxy.get_udp_relay()
-            relay_d.addCallback(self._got_udp_relay, d, *args)
-            relay_d.addErrback(d.errback)
-            return d
+            return chain_deferred_call([
+                lambda ignore: self.socks_proxy.get_udp_relay(),
+                functools.partial(self._got_udp_relay, query_args=args),
+            ], defer.Deferred(), 'ignore')
         else:
             def stop_listening(ignore):
                 protocol.transport.stopListening()

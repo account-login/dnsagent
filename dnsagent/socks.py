@@ -16,7 +16,9 @@ from twisted.internet.protocol import DatagramProtocol, Protocol, connectionDone
 from twisted.python.failure import Failure
 from zope.interface import implementer
 
-from dnsagent.utils import get_reactor, get_client_endpoint, to_twisted_addr, patch_twisted_bugs
+from dnsagent.utils import (
+    get_reactor, get_client_endpoint, to_twisted_addr, patch_twisted_bugs, chain_deferred_call,
+)
 
 # TODO: timeout?
 
@@ -304,13 +306,13 @@ class UDPRelay:
         self.reactor = get_reactor(reactor)
 
     def setup_relay(self):
-        def connect(result: Tuple[SocksHost, int]):
+        def connect_relay(result: Tuple[SocksHost, int]):
             host, port = result
             host = str(host)
             self.relay_port.connect(host, port)
             return result
 
-        def authed(ignore):
+        def do_request(ignore):
             # TODO: interface
             self.relay_port = self.reactor.listenUDP(0, self.relay_proto)
 
@@ -322,13 +324,15 @@ class UDPRelay:
                 '::': '::1',
             }.get(client_host, client_host)
 
-            d = self.ctrl_proto \
-                .request_udp_associate(ip_address(client_host), client_port)
-            d.addCallback(connect)
-            d.chainDeferred(self.relay_defer)
+            return self.ctrl_proto.request_udp_associate(
+                ip_address(client_host), client_port,
+            )
 
-        self.ctrl_proto.auth_defer.addCallbacks(authed, self.relay_defer.errback)
-        return self.relay_defer
+        return chain_deferred_call([
+            lambda ignore: self.ctrl_proto.auth_defer,
+            do_request,
+            connect_relay,
+        ], self.relay_defer, 'ignore')
 
     def listenUDP(self, port: int, protocol: DatagramProtocol, interface='', maxPacketSize=8192):
         """
@@ -673,18 +677,14 @@ class SocksProxy:
         self.reactor = get_reactor(reactor)
 
     def get_udp_relay(self):
-        def proxy_connected(ignore):
-            relay = UDPRelay(ctrl_proto)
-            d = relay.setup_relay().addCallback(lambda ignore: relay)
-            d.chainDeferred(rv)
-
-        rv = defer.Deferred()
         proxy_endpoint = get_client_endpoint(self.reactor, (self.host, self.port))
         ctrl_proto = Socks5ControlProtocol()
-        ctrl_connected = connectProtocol(proxy_endpoint, ctrl_proto)
-        ctrl_connected.addCallbacks(proxy_connected, rv.errback)
+        relay = UDPRelay(ctrl_proto)
 
-        return rv
+        return chain_deferred_call([
+            lambda: connectProtocol(proxy_endpoint, ctrl_proto),
+            relay.setup_relay,
+        ]).addCallback(lambda ignore: relay)
 
     def connectTCP(
             self, host: str, port: int, factory: ClientFactory,
