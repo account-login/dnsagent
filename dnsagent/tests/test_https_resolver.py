@@ -1,7 +1,9 @@
+import os
 from ipaddress import ip_network
 import json
 from urllib.parse import urlparse, parse_qsl
 
+import iprir.database
 import pytest
 from twisted.internet import defer
 from twisted.names import dns
@@ -9,9 +11,12 @@ from twisted.names.error import DNSServerError
 from twisted.web.resource import Resource
 from twisted.web.server import Site
 
+from dnsagent.config import https
 from dnsagent.resolver.https import HTTPSResolver, BadRData
-from dnsagent.tests import make_rrheader, BaseTestResolver, iplist, clean_treq_connection_pool
-from dnsagent.utils import get_reactor
+from dnsagent.tests import (
+    make_rrheader, BaseTestResolver, iplist, clean_treq_connection_pool, require_internet
+)
+from dnsagent.utils import get_reactor, rrheader_to_ip
 
 
 def test_split_rdata():
@@ -218,7 +223,7 @@ class FakeApiResource(Resource):
         return json.dumps(answer).encode('utf8')
 
 
-class TestIntegration(BaseTestResolver):
+class TestHTTPSResolverWithLocalServer(BaseTestResolver):
     def setUp(self):
         super().setUp()
         self.resolver = LocalHTTPSResolver()
@@ -243,6 +248,41 @@ class TestIntegration(BaseTestResolver):
 
     def test_run(self):
         self.check_a('apple.com', iplist('17.178.96.59'))
+
+
+@require_internet
+class TestHTTPSResolverWithGoogle(BaseTestResolver):
+    _ipdb = iprir.database.DB()
+
+    def setUp(self):
+        super().setUp()
+        # TODO: test with socks proxy
+        proxy = os.environ.get('SOCKS_PROXY') or os.environ.get('HTTPS_PROXY')
+        self.resolver = https(proxy=proxy)
+
+    def tearDown(self):
+        final_d = defer.Deferred()
+        d = super().tearDown()
+        d.addCallback(lambda ignore: clean_treq_connection_pool().chainDeferred(final_d))
+        d.addErrback(final_d.errback)
+        return final_d
+
+    def run_test(self, subnet: str, country: str):
+        def check(result):
+            ans, auth, add = result
+            assert any(rr.type in (dns.A, dns.AAAA) for rr in ans)
+            for rr in ans:
+                ip = rrheader_to_ip(rr)
+                if ip:
+                    assert self._ipdb.by_ip(ip).country == country
+
+        query_kwargs = dict(client_subnet=ip_network(subnet), timeout=(2,))
+        d = self.check_a('img.alicdn.com', query_kwargs=query_kwargs)
+        d.addCallback(check)
+
+    def test_run(self):
+        self.run_test('114.114.114.0/24', 'CN')
+        self.run_test('8.8.8.0/24', 'US')
 
 
 del BaseTestResolver

@@ -1,19 +1,24 @@
+import functools
 import os
 from typing import NamedTuple
 
 from dnsagent.app import ServerInfo
 from dnsagent.resolver import (
-    ExtendedResolver, TCPExtendedResolver, ParallelResolver, ChainedResolver,
-    DualResolver, HostsResolver, CachingResolver, CnResolver,
+    ExtendedResolver, TCPExtendedResolver,
+    ParallelResolver, ChainedResolver, DualResolver, CnResolver,
+    HostsResolver, CachingResolver, HTTPSResolver,
 )
 from dnsagent.server import ExtendedDNSServerFactory
-from dnsagent.socks import SocksProxy
+from dnsagent.socks import SocksProxy, SocksWrappedReactor
 from dnsagent.utils import parse_url
 
 from twisted.names.common import ResolverBase
 
 
-__all__ = ('make_resolver', 'chain', 'parallel', 'dual', 'cn_filter', 'hosts', 'cache', 'server')
+__all__ = (
+    'make_resolver', 'chain', 'parallel', 'dual', 'cn_filter',
+    'https', 'hosts', 'cache', 'server',
+)
 
 
 def parse_proxy_string(string: str) -> SocksProxy:
@@ -78,6 +83,27 @@ def hosts(filename_or_mapping=None, *, ttl=5*60, reload=False):
         return HostsResolver(filename=filename_or_mapping, ttl=ttl, reload=reload)
     else:
         return HostsResolver(mapping=filename_or_mapping, ttl=ttl, reload=reload)
+
+
+class _PreconfiguredTreq:
+    __slots__ = ('head', 'get', 'post', 'put', 'delete', 'patch', 'request')
+
+    def __init__(self, **kwargs):
+        import treq
+        for attr in self.__slots__:
+            original = getattr(treq, attr)
+            setattr(self, attr, functools.partial(original, **kwargs))
+
+
+def https(proxy=None, **kwargs):
+    if isinstance(proxy, str):
+        proxy = parse_proxy_string(proxy)
+
+    if proxy:
+        wrapped = SocksWrappedReactor(proxy.host, proxy.port, reactor=kwargs.get('reactor'))
+        kwargs['reactor'] = wrapped
+
+    return HTTPSResolver(http_client=_PreconfiguredTreq(**kwargs))
 
 
 def cache(resolver):

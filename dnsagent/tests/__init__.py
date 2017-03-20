@@ -117,10 +117,7 @@ class BaseTestResolver(unittest.TestCase):
     def tearDown(self):
         return defer.DeferredList(self.deferreds, fireOnOneErrback=True)
 
-    def _check_query(self, query: dns.Query, expect=None, fail=None):
-        if fail:
-            assert expect is None
-
+    def _check_query(self, query: dns.Query, expect=None, fail=None, query_kwargs=None):
         def check_result(result):
             logger.info('query %r got: %r', query, result)
             if fail:
@@ -136,27 +133,32 @@ class BaseTestResolver(unittest.TestCase):
             if isinstance(fail, type) and issubclass(fail, Exception):
                 assert isinstance(failure.value, fail), 'Failure type mismatch'
 
-        d = self.resolver.query(query, timeout=[0.5])
-        d.addCallbacks(check_result, failed)
+        query_kwargs = query_kwargs or dict()
+        query_kwargs.setdefault('timeout', (0.5,))
+
+        d = self.resolver.query(query, **query_kwargs)
+        if fail is not None or expect is not None:
+            d.addCallbacks(check_result, failed)
+        # else: manual checking
         self.deferreds.append(d)
         return d
 
-    def check_a(self, name: str, expect=None, fail=None):
+    def check_a(self, name: str, expect=None, fail=None, query_kwargs=None):
         return self._check_query(
             dns.Query(name.encode('utf8'), dns.A, dns.IN),
-            expect=expect, fail=fail,
+            expect=expect, fail=fail, query_kwargs=query_kwargs,
         )
 
-    def check_aaaa(self, name: str, expect=None, fail=None):
+    def check_aaaa(self, name: str, expect=None, fail=None, query_kwargs=None):
         return self._check_query(
             dns.Query(name.encode('utf8'), dns.AAAA, dns.IN),
-            expect=expect, fail=fail,
+            expect=expect, fail=fail, query_kwargs=query_kwargs,
         )
 
-    def check_all(self, name: str, expect=None, fail=None):
+    def check_all(self, name: str, expect=None, fail=None, query_kwargs=None):
         return self._check_query(
             dns.Query(name.encode('utf8'), dns.ALL_RECORDS, dns.IN),
-            expect=expect, fail=fail,
+            expect=expect, fail=fail, query_kwargs=query_kwargs,
         )
 
 
