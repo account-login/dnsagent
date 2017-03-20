@@ -16,8 +16,7 @@ from twisted.internet.protocol import DatagramProtocol, Protocol, connectionDone
 from twisted.python.failure import Failure
 from zope.interface import implementer
 
-from dnsagent.utils import get_reactor, get_client_endpoint, to_twisted_addr
-
+from dnsagent.utils import get_reactor, get_client_endpoint, to_twisted_addr, patch_twisted_bugs
 
 # TODO: timeout?
 
@@ -713,6 +712,7 @@ class SocksProxy:
         except ImportError:
             raise NotImplementedError
         else:
+            patch_twisted_bugs()
             tls_factory = tls.TLSMemoryBIOFactory(contextFactory, True, factory)
             return self.connectTCP(host, port, tls_factory, timeout, bindAddress)
 

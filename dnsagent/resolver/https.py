@@ -6,6 +6,7 @@ from twisted.names import dns
 
 from dnsagent import logger
 from dnsagent.resolver import BaseResolver
+from dnsagent.utils import patch_twisted_bugs
 
 
 __all__ = ('HTTPSResolver',)
@@ -27,6 +28,8 @@ class HTTPSResolver(BaseResolver):
 
     def __init__(self, http_client=None):
         super().__init__()
+        patch_twisted_bugs()
+
         if http_client is None:
             import treq as http_client
         self.http_client = http_client
