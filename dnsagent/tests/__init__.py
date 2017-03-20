@@ -1,3 +1,4 @@
+import subprocess
 from ipaddress import ip_address, IPv4Address, IPv6Address
 import logging
 import os
@@ -13,7 +14,7 @@ from twisted.python.failure import Failure
 from twisted.trial import unittest
 
 from dnsagent.app import init_log, enable_log
-from dnsagent.utils import rrheader_to_ip, get_reactor, to_twisted_addr
+from dnsagent.utils import rrheader_to_ip, get_reactor, to_twisted_addr, wait_for_tcp
 from dnsagent.resolver.base import BaseResolver
 
 
@@ -272,3 +273,62 @@ class OneshotServerFactory(ServerFactory):
 def clean_treq_connection_pool():
     import treq._utils
     return treq._utils.get_global_pool().closeCachedConnections()
+
+
+class SSRunner:
+    ss_server_host = '127.0.0.20'
+    ss_server_port = 2222
+    ss_client_host = '127.0.0.30'
+    ss_client_port = 3333
+    ss_passwd = '123'
+
+    ss_server = None
+    ss_local = None
+    _ss_defer = None
+
+    @classmethod
+    def start(cls) -> defer.Deferred:
+        if cls._ss_defer is None:
+            cls.ss_server = subprocess.Popen([
+                'ssserver', '-s', cls.ss_server_host, '-p', str(cls.ss_server_port),
+                '-k', cls.ss_passwd, '--forbidden-ip', '',
+            ])
+            cls.ss_local = subprocess.Popen([
+                'sslocal', '-s', cls.ss_server_host, '-p', str(cls.ss_server_port),
+                '-b', cls.ss_client_host, '-l', str(cls.ss_client_port), '-k', cls.ss_passwd,
+            ])
+
+            cls._ss_defer = wait_for_tcp((cls.ss_client_host, cls.ss_client_port))
+
+        return cls._ss_defer
+
+    @classmethod
+    def shutdown(cls):
+        if cls._ss_defer is not None:
+            cls._ss_defer = None
+            for popen in (cls.ss_server, cls.ss_local):
+                if popen is not None and popen.returncode is None:
+                    kill_proccess(popen)
+            cls.ss_server, cls.ss_local = None, None
+
+
+def kill_proccess(popen: subprocess.Popen):
+    try:
+        import psutil
+    except ImportError:
+        popen.terminate()
+    else:
+        # kill process tree
+        # since python is a subprocess of sslocal/ssserver on windows
+        pid = popen.pid
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        for child in children:
+            child.kill()
+        psutil.wait_procs(children, timeout=2)
+
+        try:
+            parent.kill()
+            parent.wait(2)
+        except Exception:
+            logger.exception('failed to kill process: %d', pid)

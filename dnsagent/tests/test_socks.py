@@ -1,7 +1,6 @@
 import logging
 import os
 import struct
-import subprocess
 from io import BytesIO
 from ipaddress import ip_address
 
@@ -35,9 +34,10 @@ from dnsagent.tests import (
     FakeTransport, FakeDatagramProtocol, FakeProtocol,
     OneshotClientFactory, OneshotServerFactory,
     Greeter, TCPGreeter, Reverser, TCPReverser,
+    SSRunner,
 )
 from dnsagent.utils import (
-    rrheader_to_ip, get_reactor, get_client_endpoint, wait_for_tcp, to_twisted_addr,
+    rrheader_to_ip, get_reactor, get_client_endpoint, to_twisted_addr,
 )
 
 
@@ -597,62 +597,6 @@ class TestUDPRelayWithFakeServer(BaseTestUDPRelayIntegrated):
         return defer.DeferredList(dl, fireOnOneErrback=True)
 
 
-class SSRunner:
-    ss_server_host = '127.0.0.20'
-    ss_server_port = 2222
-    ss_client_host = '127.0.0.30'
-    ss_client_port = 3333
-    ss_passwd = '123'
-
-    ss_server = None
-    ss_local = None
-    _ss_defer = None
-
-    @classmethod
-    def start(cls) -> defer.Deferred:
-        if cls._ss_defer is None:
-            cls.ss_server = subprocess.Popen([
-                'ssserver', '-s', cls.ss_server_host, '-p', str(cls.ss_server_port),
-                '-k', cls.ss_passwd, '--forbidden-ip', '',
-            ])
-            cls.ss_local = subprocess.Popen([
-                'sslocal', '-s', cls.ss_server_host, '-p', str(cls.ss_server_port),
-                '-b', cls.ss_client_host, '-l', str(cls.ss_client_port), '-k', cls.ss_passwd,
-            ])
-
-            cls._ss_defer = wait_for_tcp((cls.ss_client_host, cls.ss_client_port))
-
-        return cls._ss_defer
-
-    @classmethod
-    def shutdown(cls):
-        for popen in (cls.ss_server, cls.ss_local):
-            if popen.returncode is None:
-                kill_proccess(popen)
-
-
-def kill_proccess(popen: subprocess.Popen):
-    try:
-        import psutil
-    except ImportError:
-        popen.terminate()
-    else:
-        # kill process tree
-        # since python is a subprocess of sslocal/ssserver on windows
-        pid = popen.pid
-        parent = psutil.Process(pid)
-        children = parent.children(recursive=True)
-        for child in children:
-            child.kill()
-        psutil.wait_procs(children, timeout=2)
-
-        try:
-            parent.kill()
-            parent.wait(2)
-        except Exception:
-            logger.exception('failed to kill process: %d', pid)
-
-
 # noinspection PyAttributeOutsideInit
 class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
     service_host = '127.0.0.40'
@@ -1078,8 +1022,7 @@ class TestSocksProxyWithTreq(TestSocksProxyConnectSSL):
 
 
 def tearDownModule():
-    if SSRunner.ss_local:
-        SSRunner.shutdown()
+    SSRunner.shutdown()
 
 
 del BaseTestUDPRelayIntegrated

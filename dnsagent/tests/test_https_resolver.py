@@ -14,7 +14,8 @@ from twisted.web.server import Site
 from dnsagent.config import https
 from dnsagent.resolver.https import HTTPSResolver, BadRData
 from dnsagent.tests import (
-    make_rrheader, BaseTestResolver, iplist, clean_treq_connection_pool, require_internet
+    make_rrheader, BaseTestResolver, iplist, clean_treq_connection_pool,
+    require_internet, SSRunner,
 )
 from dnsagent.utils import get_reactor, rrheader_to_ip
 
@@ -223,6 +224,7 @@ class FakeApiResource(Resource):
         return json.dumps(answer).encode('utf8')
 
 
+# noinspection PyAttributeOutsideInit
 class TestHTTPSResolverWithLocalServer(BaseTestResolver):
     def setUp(self):
         super().setUp()
@@ -256,9 +258,16 @@ class TestHTTPSResolverWithGoogle(BaseTestResolver):
 
     def setUp(self):
         super().setUp()
-        # TODO: test with socks proxy
+
+        d = None
         proxy = os.environ.get('SOCKS_PROXY') or os.environ.get('HTTPS_PROXY')
+        if not proxy:
+            # test socks proxy
+            proxy = 'socks5://%s:%d' % (SSRunner.ss_client_host, SSRunner.ss_client_port)
+            d = SSRunner.start()
+
         self.resolver = https(proxy=proxy)
+        return d
 
     def tearDown(self):
         final_d = defer.Deferred()
@@ -283,6 +292,10 @@ class TestHTTPSResolverWithGoogle(BaseTestResolver):
     def test_run(self):
         self.run_test('114.114.114.0/24', 'CN')
         self.run_test('8.8.8.0/24', 'US')
+
+
+def tearDownModule():
+    SSRunner.shutdown()
 
 
 del BaseTestResolver
