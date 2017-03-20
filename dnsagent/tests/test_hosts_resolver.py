@@ -72,7 +72,7 @@ def test_config_hosts():
     assert os.path.exists(resolver.filename)
 
     resolver = hosts(dict(ABC='1.2.3.4'))
-    assert resolver.name2ip == dict(abc=iplist('1.2.3.4'))
+    assert resolver.name2iplist == dict(abc=iplist('1.2.3.4'))
 
 
 del BaseTestResolver

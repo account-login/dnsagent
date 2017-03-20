@@ -1,6 +1,6 @@
 from collections import defaultdict
 from ipaddress import ip_address, IPv4Address, IPv6Address
-from typing import Mapping
+from typing import Mapping, Union, List
 
 from twisted.internet import defer
 from twisted.names import dns
@@ -14,13 +14,16 @@ from dnsagent.utils import watch_modification
 __all__ = ('HostsResolver',)
 
 
+Name2IpListType = Mapping[str, List[Union[IPv4Address, IPv6Address]]]
+
+
 def validate_domain_name(name: str):
     # TODO:
     # name = name.encode('utf-8').decode('idna').lower()
     return True
 
 
-def parse_hosts_file(lines):
+def parse_hosts_file(lines) -> Name2IpListType:
     def bad_line(lineno, line):
         logger.error('bad host file. line %d, %r', lineno, line)
 
@@ -74,59 +77,35 @@ class HostsResolver(BaseResolver):
             if reload:
                 watch_modification(filename, self._load_hosts)
         elif mapping is not None:
-            self.name2ip = {
+            self.name2iplist = {    # type: Name2IpListType
                 domain.lower(): [ ip_address(ip) ]
                 for domain, ip in mapping.items()
             }
 
     def _load_hosts(self):
         logger.debug('loading hosts file: %s', self.filename)
-        self.name2ip = read_hosts_file(self.filename)
+        self.name2iplist = read_hosts_file(self.filename)
 
-    def _get_a_records(self, name: bytes):
-        """
-        Return a tuple of L{dns.RRHeader} instances for all of the IPv4
-        addresses in the hosts file.
-        """
-        name_str = name.decode('utf8').lower()
+    _ipversion_to_dns_type = {
+        4: dns.A, 6: dns.AAAA,
+    }
+    _ipversion_to_record_type = {
+        4: dns.Record_A, 6: dns.Record_AAAA,
+    }
+
+    def _get_records(self, name: Union[str, bytes], ip_versions):
+        if isinstance(name, bytes):
+            name_str, name_bytes = name.decode('ascii').lower(), name
+        else:
+            name_str, name_bytes = name, name.encode('idna')
+
         return tuple(
             dns.RRHeader(
-                name, dns.A, dns.IN, self.ttl,
-                dns.Record_A(addr.exploded, self.ttl))
-            for addr in self.name2ip.get(name_str, [])
-            if isinstance(addr, IPv4Address)
-        )
-
-    def _get_aaaa_records(self, name: bytes):
-        """
-        Return a tuple of L{dns.RRHeader} instances for all of the IPv6
-        addresses in the hosts file.
-        """
-        name_str = name.decode('utf8').lower()
-        return tuple(
-            dns.RRHeader(
-                name, dns.AAAA, dns.IN, self.ttl,
-                dns.Record_AAAA(addr.exploded, self.ttl))
-            for addr in self.name2ip.get(name_str, [])
-            if isinstance(addr, IPv6Address)
-        )
-
-    def _get_all_records(self, name: bytes):
-        ip_type_to_dns_type = {
-            IPv4Address: dns.A,
-            IPv6Address: dns.AAAA,
-        }
-        ip_type_to_record_type = {
-            IPv4Address: dns.Record_A,
-            IPv6Address: dns.Record_AAAA,
-        }
-
-        name_str = name.decode('utf8').lower()
-        return tuple(
-            dns.RRHeader(
-                name, ip_type_to_dns_type[addr.__class__], dns.IN, self.ttl,
-                ip_type_to_record_type[addr.__class__](addr.exploded, self.ttl))
-            for addr in self.name2ip.get(name_str, [])
+                name_bytes, self._ipversion_to_dns_type[addr.version], dns.IN, self.ttl,
+                self._ipversion_to_record_type[addr.version](addr.exploded, self.ttl),
+            )
+            for addr in self.name2iplist.get(name_str, [])
+            if addr.version in ip_versions
         )
 
     def _respond(self, name, records, **kwargs):
@@ -154,20 +133,20 @@ class HostsResolver(BaseResolver):
         """
         Return any IPv4 addresses from C{self.name2ip} as L{Record_A} instances.
         """
-        return self._respond(name, self._get_a_records(name), **kwargs)
+        return self._respond(name, self._get_records(name, {4}), **kwargs)
 
     def lookupIPV6Address(self, name, timeout=None, **kwargs):
         """
         Return any IPv6 addresses from C{self.name2ip} as L{Record_AAAA} instances.
         """
-        return self._respond(name, self._get_aaaa_records(name), **kwargs)
+        return self._respond(name, self._get_records(name, {6}), **kwargs)
 
     def lookupAllRecords(self, name, timeout=None, **kwargs):
         """
         Return any addresses from C{self.name2ip} as either
         L{Record_AAAA} or L{Record_A} instances.
         """
-        return self._respond(name, self._get_all_records(name), **kwargs)
+        return self._respond(name, self._get_records(name, {4, 6}), **kwargs)
 
     def lookupPointer(self, name, timeout=None, **kwargs):
         # TODO: ptr
