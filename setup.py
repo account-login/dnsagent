@@ -14,7 +14,7 @@ setup(
     packages=['dnsagent'],
     install_requires=[
         'iprir>=0.1.2.dev0',
-        'twisted>16',
+        'twisted>=17.1',
         'treq>16',
         'watchdog>=0.8',
         'zope.interface',
