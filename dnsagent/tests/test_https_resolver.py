@@ -16,7 +16,7 @@ from dnsagent.resolver.https import HTTPSResolver, BadRData
 from dnsagent.tests import (
     make_rrheader, BaseTestResolver, iplist, clean_treq_connection_pool, require_internet
 )
-from dnsagent.utils import get_reactor, rrheader_to_ip
+from dnsagent.utils import get_reactor, rrheader_to_ip, patch_twisted_bugs
 
 
 def test_split_rdata():
@@ -256,6 +256,7 @@ class TestHTTPSResolverWithGoogle(BaseTestResolver):
 
     def setUp(self):
         super().setUp()
+        patch_twisted_bugs()
         # TODO: test with socks proxy
         proxy = os.environ.get('SOCKS_PROXY') or os.environ.get('HTTPS_PROXY')
         self.resolver = https(proxy=proxy)
