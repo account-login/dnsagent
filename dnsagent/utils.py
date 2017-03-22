@@ -5,7 +5,7 @@ import os
 import re
 import socket
 import sys
-from typing import NamedTuple, Tuple, Sequence, Callable, Any, Union
+from typing import NamedTuple, Tuple, Sequence, Callable
 
 from twisted.internet._sslverify import IOpenSSLTrustRoot, Certificate, platformTrust
 from twisted.internet import defer, address as taddress

@@ -14,6 +14,7 @@ setup(
     packages=['dnsagent'],
     install_requires=[
         'iprir>=0.3.0.dev0',
+        'netifaces>0.10',
         'twisted>=17.1',
         'treq>16',
         'watchdog>=0.8',

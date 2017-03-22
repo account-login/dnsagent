@@ -17,6 +17,7 @@ from dnsagent.app import init_log, enable_log
 from dnsagent.resolver.base import BaseResolver
 from dnsagent.utils import rrheader_to_ip, get_reactor, to_twisted_addr, wait_for_tcp
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -273,7 +274,9 @@ class OneshotServerFactory(ServerFactory):
 
 def clean_treq_connection_pool():
     import treq._utils
-    return treq._utils.get_global_pool().closeCachedConnections()
+    pool = treq._utils.get_global_pool()
+    if pool:
+        return pool.closeCachedConnections()
 
 
 class SSRunner:
