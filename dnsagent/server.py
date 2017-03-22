@@ -1,10 +1,16 @@
+from ipaddress import IPv4Network, IPv6Network
 import time
+from typing import Optional, Union
+
 from twisted.names.server import DNSServerFactory
 from twisted.names import dns
 
 from dnsagent import logger
 from dnsagent.resolver.bugfix import BugFixDNSProtocol
 from dnsagent.resolver.extended import ExtendedDNSProtocol, EDNSMessage, OPTClientSubnetOption
+
+
+NetworkType = Union[IPv4Network, IPv6Network]
 
 
 class BugFixDNSServerFactory(DNSServerFactory):
@@ -57,12 +63,12 @@ class BugFixDNSServerFactory(DNSServerFactory):
         """
         logger.info('[%d]handleQuery(%r), from %s', message.id, message.queries[0], address)
 
-        d = self.do_query_from_request_message(message)
+        d = self.do_query(message, address)
         d.addCallback(self.gotResolverResponse, protocol, message, address)
         d.addErrback(self.gotResolverError, protocol, message, address)
         return d
 
-    def do_query_from_request_message(self, message: dns.Message):
+    def do_query(self, message: dns.Message, addr):
         query = message.queries[0]
         # FIXED:  timeout argument
         return self.resolver.query(query, timeout=self.resolve_timeout, request_id=message.id)
@@ -98,16 +104,33 @@ class BugFixDNSServerFactory(DNSServerFactory):
         )
 
 
+class BaseClientSubnetPolicy:
+    def __call__(self, message: EDNSMessage, addr) -> Optional[NetworkType]:
+        raise NotImplementedError
+
+
+class PassingPolicy(BaseClientSubnetPolicy):
+    def __call__(self, message: EDNSMessage, addr):
+        for option in message.options:
+            if option.code == OPTClientSubnetOption.CLIENT_SUBNET_OPTION_CODE:
+                client_subnet, scope_prefix = OPTClientSubnetOption.parse_data(option.data)
+                return client_subnet
+
+
 class ExtendedDNSServerFactory(BugFixDNSServerFactory):
     # TODO: respond with edns message
     protocol = ExtendedDNSProtocol
 
-    def do_query_from_request_message(self, message: EDNSMessage):
+    def __init__(
+            self, resolver, resolve_timeout=(5,),
+            client_subnet_policy=PassingPolicy()
+    ):
+        super().__init__(resolver, resolve_timeout=resolve_timeout)
+        self.client_subnet_policy = client_subnet_policy
+
+    def do_query(self, message: EDNSMessage, addr):
         query = message.queries[0]
-        client_subnet = None
-        for option in message.options:
-            if option.code == OPTClientSubnetOption.CLIENT_SUBNET_OPTION_CODE:
-                client_subnet, scope_prefix = OPTClientSubnetOption.parse_data(option.data)
+        client_subnet = self.client_subnet_policy(message, addr)
         return self.resolver.query(
             query, timeout=self.resolve_timeout, request_id=message.id,
             client_subnet=client_subnet,
