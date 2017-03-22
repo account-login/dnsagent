@@ -242,7 +242,7 @@ def patched_platform_trust():
         return platformTrust()
 
 
-def patch_twisted_bugs():
+def patch_twisted_ssl_root_bug():
     """
     Add native Windows trusted CA database support for SSL certificate validation
     

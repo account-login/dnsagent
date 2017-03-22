@@ -4,7 +4,7 @@ from twisted.trial import unittest
 
 from dnsagent.config import parse_dns_server_string, DnsServerInfo
 from dnsagent.tests import clean_treq_connection_pool, require_internet
-from dnsagent.utils import BadURL, parse_url, ParsedURL, patch_twisted_bugs
+from dnsagent.utils import BadURL, parse_url, ParsedURL, patch_twisted_ssl_root_bug
 
 
 class BaseTestParseURL(unittest.TestCase):
@@ -57,7 +57,7 @@ class TestTwistedSSLBug(unittest.TestCase):
     """Windows only bug"""
 
     def setUp(self):
-        patch_twisted_bugs()
+        patch_twisted_ssl_root_bug()
 
     def tearDown(self):
         return clean_treq_connection_pool()
