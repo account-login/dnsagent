@@ -13,7 +13,7 @@ setup(
     version=dnsagent.__version__,
     packages=['dnsagent'],
     install_requires=[
-        'iprir>=0.1.2.dev0',
+        'iprir>=0.3.0.dev0',
         'twisted>=17.1',
         'treq>16',
         'watchdog>=0.8',

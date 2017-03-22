@@ -3,7 +3,7 @@ from ipaddress import ip_network
 import json
 from urllib.parse import urlparse, parse_qsl
 
-import iprir.database
+import iprir
 import pytest
 from twisted.internet import defer
 from twisted.names import dns
@@ -251,8 +251,6 @@ class TestHTTPSResolverWithLocalServer(BaseTestResolver):
 
 @require_internet
 class TestHTTPSResolverWithGoogle(BaseTestResolver):
-    _ipdb = iprir.database.DB()
-
     def setUp(self):
         super().setUp()
 
@@ -279,7 +277,7 @@ class TestHTTPSResolverWithGoogle(BaseTestResolver):
             for rr in ans:
                 ip = rrheader_to_ip(rr)
                 if ip:
-                    assert self._ipdb.by_ip(ip).country == country
+                    assert iprir.by_ip(ip).country == country
 
         query_kwargs = dict(client_subnet=ip_network(subnet), timeout=(2,))
         d = self.check_a('img.alicdn.com', query_kwargs=query_kwargs)

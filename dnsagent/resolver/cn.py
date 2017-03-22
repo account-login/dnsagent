@@ -1,7 +1,7 @@
 from ipaddress import IPv4Address, IPv6Address
 from typing import Union
 
-from iprir.ipset import IpSet
+import iprir
 from twisted.names import dns
 
 from dnsagent.resolver import BaseResolver
@@ -32,11 +32,11 @@ class CnResolver(BaseResolver):
     def is_cn_ip(cls, ip: Union[IPv4Address, IPv6Address]) -> bool:
         if isinstance(ip, IPv4Address):
             if cls.cn4_set is None:
-                cls.cn4_set = IpSet.by_country('ipv4', 'CN')
+                cls.cn4_set = iprir.by_country('ipv4', 'CN')
             return ip in cls.cn4_set
         else:
             if cls.cn6_set is None:
-                cls.cn6_set = IpSet.by_country('ipv6', 'CN')
+                cls.cn6_set = iprir.by_country('ipv6', 'CN')
             return ip in cls.cn6_set
 
     def drop_potential_polluted(self, result):
