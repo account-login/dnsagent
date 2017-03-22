@@ -65,7 +65,7 @@ class BaseIpApi:
         ], defer.Deferred(), self.API_URL)
 
     def decode(self, text: str) -> IPv4Address:
-        return ip_address(re.match(r'.*(\d+\.\d+\.\d+\.\d+)', text).group(1))
+        return ip_address(re.match(r'.*?(\d+\.\d+\.\d+\.\d+)', text).group(1))
 
 
 class TaobaoIpApi(BaseIpApi):

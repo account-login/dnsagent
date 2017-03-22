@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 def test_get_public_ip_from_netifaces():
     ip = get_public_ip_from_netifaces()
     if ip is None:
-        logger.error('failed to get public ip netifaces')
+        logger.error('failed to get public ip from netifaces')
     else:
         logger.info('public ip from netifaces: %s', ip)
 
