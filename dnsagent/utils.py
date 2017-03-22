@@ -252,6 +252,33 @@ def patch_twisted_ssl_root_bug():
     mod.platformTrust = patched_platform_trust
 
 
+class HTTPConnectionPoolBugFixMixin:
+    def _removeConnection(self, key, connection):
+        """
+        Remove a connection from the cache and disconnect it.
+        """
+        # avoid calling loseConnection() when connection is disconnected already.
+        if connection.state != 'CONNECTION_LOST':
+            connection.transport.loseConnection()
+        self._connections[key].remove(connection)
+        del self._timeouts[connection]
+
+
+def patch_twisted_http_connection_pool_bug():
+    from twisted.web.client import HTTPConnectionPool
+    HTTPConnectionPool._removeConnection = HTTPConnectionPoolBugFixMixin._removeConnection
+
+
+def get_treq():
+    """
+    treq should be lazy imported since importing treq will install reactor.
+    twisted.web.client.HTTPConnectionPool is patched here too.
+    """
+    patch_twisted_http_connection_pool_bug()
+    import treq
+    return treq
+
+
 # This is an unique object used to distinguish between None and unused argument
 _NONE = object()
 

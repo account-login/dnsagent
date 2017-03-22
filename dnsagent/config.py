@@ -12,7 +12,7 @@ from dnsagent.resolver import (
 )
 from dnsagent.server import ExtendedDNSServerFactory, AutoDiscoveryPolicy
 from dnsagent.socks import SocksProxy, SocksWrappedReactor
-from dnsagent.utils import parse_url
+from dnsagent.utils import parse_url, get_treq
 
 
 __all__ = (
@@ -89,7 +89,7 @@ class _PreconfiguredTreq:
     __slots__ = ('head', 'get', 'post', 'put', 'delete', 'patch', 'request')
 
     def __init__(self, **kwargs):
-        import treq
+        treq = get_treq()
         for attr in self.__slots__:
             original = getattr(treq, attr)
             setattr(self, attr, functools.partial(original, **kwargs))

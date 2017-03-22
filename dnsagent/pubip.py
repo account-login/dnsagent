@@ -5,10 +5,9 @@ from ipaddress import ip_address, IPv4Address
 from typing import Optional, Sequence
 
 import netifaces
-import treq
 from twisted.internet import defer
 
-from dnsagent.utils import chain_deferred_call
+from dnsagent.utils import chain_deferred_call, get_treq
 
 
 logger = logging.getLogger(__name__)
@@ -58,6 +57,7 @@ class BaseIpApi:
     API_URL = None  # type: str
 
     def get_ip(self) -> defer.Deferred:
+        treq = get_treq()
         return chain_deferred_call([
             treq.get,
             treq.text_content,

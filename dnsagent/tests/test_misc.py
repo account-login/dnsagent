@@ -1,10 +1,9 @@
 import pytest
-import treq
 from twisted.trial import unittest
 
 from dnsagent.config import parse_dns_server_string, DnsServerInfo
 from dnsagent.tests import clean_treq_connection_pool, require_internet
-from dnsagent.utils import BadURL, parse_url, ParsedURL, patch_twisted_ssl_root_bug
+from dnsagent.utils import BadURL, parse_url, ParsedURL, patch_twisted_ssl_root_bug, get_treq
 
 
 class BaseTestParseURL(unittest.TestCase):
@@ -66,6 +65,7 @@ class TestTwistedSSLBug(unittest.TestCase):
         def check(text):
             assert len(text) > 10
 
+        treq = get_treq()
         d = treq.get('https://example.com/')
         return d.addCallback(treq.text_content).addCallback(check)
 

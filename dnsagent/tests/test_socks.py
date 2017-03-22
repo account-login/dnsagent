@@ -5,7 +5,6 @@ from io import BytesIO
 from ipaddress import ip_address
 
 import pytest
-import treq
 from twisted.internet import address as taddress, defer, ssl
 from twisted.internet.endpoints import (
     TCP4ClientEndpoint, TCP4ServerEndpoint, SSL4ServerEndpoint, connectProtocol,
@@ -37,7 +36,8 @@ from dnsagent.tests import (
     SSRunner,
 )
 from dnsagent.utils import (
-    rrheader_to_ip, get_reactor, get_client_endpoint, to_twisted_addr, chain_deferred_call,
+    get_reactor, get_client_endpoint, get_treq,
+    rrheader_to_ip, to_twisted_addr, chain_deferred_call,
 )
 
 
@@ -1007,6 +1007,7 @@ class TestSocksProxyWithTreq(TestSocksProxyConnectSSL):
         url = 'https://%s:%d/' % (hostname, self.service_port)
         proxy = SocksWrappedReactor(self.socks_host, self.socks_port, reactor=self.reactor)
         agent = Agent(reactor=proxy, contextFactory=self.https_policy)
+        treq = get_treq()
         d = treq.get(url, agent=agent)
         d.addCallback(treq.text_content)
         d.addCallback(check)

@@ -6,7 +6,7 @@ from twisted.names import dns
 
 from dnsagent import logger
 from dnsagent.resolver import BaseResolver
-from dnsagent.utils import patch_twisted_ssl_root_bug, chain_deferred_call
+from dnsagent.utils import patch_twisted_ssl_root_bug, chain_deferred_call, get_treq
 
 
 __all__ = ('HTTPSResolver',)
@@ -30,19 +30,14 @@ class HTTPSResolver(BaseResolver):
         super().__init__()
         patch_twisted_ssl_root_bug()
 
-        if http_client is None:
-            import treq as http_client
-        self.http_client = http_client
+        self.http_client = http_client or get_treq()
 
     def _lookup(self, name: bytes, cls, type_, timeout, **kwargs):
         d = self.make_request(name, cls, type_, timeout, **kwargs)
         return d.addCallback(self.decode_response)
 
     def make_request(self, name: bytes, cls, type_, timeout, **kwargs):
-        # NOTE: treq is lazy imported
-        # since importing treq will install reactor
-        import treq
-
+        treq = get_treq()
         url = self.make_request_url(name, cls, type_, **kwargs)
         return chain_deferred_call([
             self.http_client.get,
