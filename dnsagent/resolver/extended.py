@@ -3,7 +3,7 @@ import math
 import socket
 import struct
 from ipaddress import IPv4Network, IPv6Network, ip_network
-from typing import Union, List, Callable
+from typing import Union, List, Callable, Tuple
 
 from twisted.internet import defer
 from twisted.internet.protocol import ClientFactory
@@ -26,6 +26,7 @@ __all__ = ('ExtendedResolver', 'TCPExtendedResolver')
 NetworkType = Union[IPv4Network, IPv6Network]
 
 
+# noinspection PyPep8Naming
 class EDNSMessage(_EDNSMessage):
     """
     Fixed bugs:
@@ -189,7 +190,7 @@ class OPTClientSubnetOption(_OPTVariableOption):
         return cls(cls.CLIENT_SUBNET_OPTION_CODE, data)
 
     @classmethod
-    def parse_data(cls, data: bytes):
+    def parse_data(cls, data: bytes) -> Tuple[NetworkType, int]:
         def pad_zero(b: bytes, n: int):
             pad_len = n - len(b)
             return b + b'\0' * pad_len

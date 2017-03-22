@@ -2,22 +2,22 @@ import functools
 import os
 from typing import NamedTuple
 
+from twisted.names.common import ResolverBase
+
 from dnsagent.app import ServerInfo
 from dnsagent.resolver import (
     ExtendedResolver, TCPExtendedResolver,
     ParallelResolver, ChainedResolver, DualResolver, CnResolver,
     HostsResolver, CachingResolver, HTTPSResolver,
 )
-from dnsagent.server import ExtendedDNSServerFactory
+from dnsagent.server import ExtendedDNSServerFactory, AutoDiscoveryPolicy
 from dnsagent.socks import SocksProxy, SocksWrappedReactor
 from dnsagent.utils import parse_url
-
-from twisted.names.common import ResolverBase
 
 
 __all__ = (
     'make_resolver', 'chain', 'parallel', 'dual', 'cn_filter',
-    'https', 'hosts', 'cache', 'server',
+    'https', 'hosts', 'cache', 'server', 'AutoDiscoveryPolicy',
 )
 
 
@@ -110,11 +110,14 @@ def cache(resolver):
     return CachingResolver(make_resolver(resolver))
 
 
-def _make_server(resolver, *, timeout=None):
-    return ExtendedDNSServerFactory(resolver=resolver, resolve_timeout=timeout)
+def _make_server(resolver, *, timeout=None, **kwargs):
+    return ExtendedDNSServerFactory(resolver=resolver, resolve_timeout=timeout, **kwargs)
 
 
-def server(resolver, *, port=None, interface=None, binds=None, timeout=None) -> ServerInfo:
+def server(
+        resolver, *, port=None, interface=None, binds=None,
+        timeout=None, client_subnet_policy=None
+) -> ServerInfo:
     if binds is None:
         if port is None:
             port = 53
@@ -124,5 +127,8 @@ def server(resolver, *, port=None, interface=None, binds=None, timeout=None) -> 
     else:
         assert port is interface is None
 
-    srv = _make_server(make_resolver(resolver), timeout=timeout)
+    srv = _make_server(
+        make_resolver(resolver),
+        timeout=timeout, client_subnet_policy=client_subnet_policy,
+    )
     return srv, binds

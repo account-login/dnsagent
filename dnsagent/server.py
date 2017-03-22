@@ -1,4 +1,4 @@
-from ipaddress import IPv4Network, IPv6Network
+from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 import time
 from typing import Optional, Union
 
@@ -6,6 +6,7 @@ from twisted.names.server import DNSServerFactory
 from twisted.names import dns
 
 from dnsagent import logger
+from dnsagent.pubip import get_public_ip
 from dnsagent.resolver.bugfix import BugFixDNSProtocol
 from dnsagent.resolver.extended import ExtendedDNSProtocol, EDNSMessage, OPTClientSubnetOption
 
@@ -109,24 +110,63 @@ class BaseClientSubnetPolicy:
         raise NotImplementedError
 
 
-class PassingPolicy(BaseClientSubnetPolicy):
+def passing_policy(message: EDNSMessage, addr):
+    for option in message.options:
+        if option.code == OPTClientSubnetOption.CLIENT_SUBNET_OPTION_CODE:
+            client_subnet, scope_prefix = OPTClientSubnetOption.parse_data(option.data)
+            return client_subnet
+
+
+class AutoDiscoveryPolicy(BaseClientSubnetPolicy):
+    def __init__(self, max_ipv4_prefixlen=24, max_ipv6_prefixlen=96):
+        self.max_prefix_lens = {
+            4: max_ipv4_prefixlen,
+            6: max_ipv6_prefixlen,
+        }
+        self.get_public_ip_called = False
+        self.server_public_ip = None
+
     def __call__(self, message: EDNSMessage, addr):
-        for option in message.options:
-            if option.code == OPTClientSubnetOption.CLIENT_SUBNET_OPTION_CODE:
-                client_subnet, scope_prefix = OPTClientSubnetOption.parse_data(option.data)
-                return client_subnet
+        subnet = passing_policy(message, addr)
+        if not subnet:
+            ip, port = addr
+            ip = ip_address(ip)
+            if not ip.is_private and not ip.is_unspecified:
+                subnet = ip_network(ip)
+                logger.debug('got client_subnet from client address: %s', subnet)
+        else:
+            logger.debug('got client_subnet from request: %s', subnet)
+
+        if not subnet:
+            if not self.get_public_ip_called:
+                def set_server_public_ip(ip):
+                    self.server_public_ip = ip
+
+                self.get_public_ip_called = True
+                get_public_ip().addCallback(set_server_public_ip)
+
+            if self.server_public_ip:
+                subnet = ip_network(self.server_public_ip)
+                logger.debug('got client_subnet from server ip: %s', subnet)
+
+        if subnet:
+            max_prefix_len = self.max_prefix_lens[subnet.version]
+            if subnet.prefixlen > max_prefix_len:
+                # do not leak exact ip address
+                net_string = '%s/%d' % (subnet.network_address, max_prefix_len)
+                subnet = ip_network(net_string, strict=False)
+                logger.debug('client_subnet truncated to %s', subnet)
+
+        return subnet
 
 
 class ExtendedDNSServerFactory(BugFixDNSServerFactory):
     # TODO: respond with edns message
     protocol = ExtendedDNSProtocol
 
-    def __init__(
-            self, resolver, resolve_timeout=(5,),
-            client_subnet_policy=PassingPolicy()
-    ):
+    def __init__(self, resolver, resolve_timeout=(5,), client_subnet_policy=None):
         super().__init__(resolver, resolve_timeout=resolve_timeout)
-        self.client_subnet_policy = client_subnet_policy
+        self.client_subnet_policy = client_subnet_policy or passing_policy
 
     def do_query(self, message: EDNSMessage, addr):
         query = message.queries[0]
