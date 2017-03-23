@@ -123,11 +123,12 @@ def passing_policy(message: EDNSMessage, addr):
 class AutoDiscoveryPolicy(BaseClientSubnetPolicy):
     def __init__(
             self, max_ipv4_prefixlen=24, max_ipv6_prefixlen=96,
-            retry_intevals=(2, 10, 60, 300), reactor=None):
+            fallback: NetworkType = None, retry_intevals=(2, 10, 60, 300), reactor=None):
         self.max_prefix_lens = {
             4: max_ipv4_prefixlen,
             6: max_ipv6_prefixlen,
         }
+        self.fallback = fallback
         self.retry_intevals = retry_intevals
         self.reactor = get_reactor(reactor)
         self.get_public_ip_called = False
@@ -153,6 +154,11 @@ class AutoDiscoveryPolicy(BaseClientSubnetPolicy):
             if self.server_public_ip:
                 subnet = ip_network(self.server_public_ip)
                 logger.debug('got client_subnet from server ip: %s', subnet)
+
+        if not subnet:
+            subnet = self.fallback
+            if subnet:
+                logger.debug('using fallback client_subnet: %s', subnet)
 
         if subnet:
             max_prefix_len = self.max_prefix_lens[subnet.version]

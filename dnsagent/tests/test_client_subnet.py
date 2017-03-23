@@ -4,13 +4,14 @@ import struct
 from typing import Union, Type
 
 import pytest
-from twisted.internet import task
+from twisted.internet import task, defer
 from twisted.internet.protocol import connectionDone
 from twisted.names import dns
 from twisted.python.failure import Failure
 from twisted.trial import unittest
 
 from dnsagent.app import App
+from dnsagent.pubip import get_public_ip
 from dnsagent.resolver import ExtendedResolver, TCPExtendedResolver
 from dnsagent.resolver.extended import (
     OPTClientSubnetOption, BadOPTClientSubnetData, QueryList,
@@ -18,7 +19,7 @@ from dnsagent.resolver.extended import (
 )
 from dnsagent.server import ExtendedDNSServerFactory, AutoDiscoveryPolicy
 from dnsagent.tests import (
-    FakeTransport, FakeResolver, clean_treq_connection_pool, require_internet,
+    FakeTransport, FakeResolver, clean_treq_connection_pool, require_internet, swap_function,
 )
 
 
@@ -201,6 +202,17 @@ class TestAutoDiscoveryPolicy(unittest.TestCase):
                     self.policy.retry_d.cancel()
 
             return self.policy.request_d.addBoth(check)
+
+    def test_fallback(self):
+        def fake_get_public_ip():
+            return defer.succeed(None)
+
+        swap_function(fake_get_public_ip, get_public_ip)
+        self.addCleanup(swap_function, fake_get_public_ip, get_public_ip)
+
+        subnet = ip_network('9.8.0.0/16')
+        self.policy = AutoDiscoveryPolicy(fallback=subnet, reactor=self.clock)
+        assert self.policy(EDNSMessage(), ('10.10.1.1', 1010)) == subnet
 
 
 del BaseTestExtendedDNSXXXProtcol

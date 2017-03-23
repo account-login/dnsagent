@@ -2,6 +2,7 @@ from ipaddress import ip_address, IPv4Address, IPv6Address
 import logging
 import os
 import subprocess
+import types
 from typing import Tuple, Sequence
 
 import pytest
@@ -336,3 +337,17 @@ def kill_proccess(popen: subprocess.Popen):
             parent.wait(2)
         except Exception:
             logger.exception('failed to kill process: %d', pid)
+
+
+def _get_function_states(func: types.FunctionType):
+    return func.__code__, func.__defaults__, func.__kwdefaults__
+
+
+def _set_function_states(func: types.FunctionType, states):
+    func.__code__, func.__defaults__, func.__kwdefaults__ = states
+
+
+def swap_function(f1: types.FunctionType, f2: types.FunctionType):
+    s1, s2 = _get_function_states(f1), _get_function_states(f2)
+    _set_function_states(f1, s2)
+    _set_function_states(f2, s1)
