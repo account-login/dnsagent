@@ -2,6 +2,8 @@ from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 import time
 from typing import Optional, Union
 
+from twisted.internet import defer
+from twisted.internet.base import DelayedCall
 from twisted.names.server import DNSServerFactory
 from twisted.names import dns
 
@@ -9,6 +11,7 @@ from dnsagent import logger
 from dnsagent.pubip import get_public_ip
 from dnsagent.resolver.bugfix import BugFixDNSProtocol
 from dnsagent.resolver.extended import ExtendedDNSProtocol, EDNSMessage, OPTClientSubnetOption
+from dnsagent.utils import get_reactor
 
 
 NetworkType = Union[IPv4Network, IPv6Network]
@@ -118,13 +121,19 @@ def passing_policy(message: EDNSMessage, addr):
 
 
 class AutoDiscoveryPolicy(BaseClientSubnetPolicy):
-    def __init__(self, max_ipv4_prefixlen=24, max_ipv6_prefixlen=96):
+    def __init__(
+            self, max_ipv4_prefixlen=24, max_ipv6_prefixlen=96,
+            retry_intevals=(2, 10, 60, 300), reactor=None):
         self.max_prefix_lens = {
             4: max_ipv4_prefixlen,
             6: max_ipv6_prefixlen,
         }
+        self.retry_intevals = retry_intevals
+        self.reactor = get_reactor(reactor)
         self.get_public_ip_called = False
         self.server_public_ip = None
+        self.request_d = None   # type: defer.Deferred
+        self.retry_d = None     # type: DelayedCall
 
     def __call__(self, message: EDNSMessage, addr):
         subnet = passing_policy(message, addr)
@@ -139,12 +148,8 @@ class AutoDiscoveryPolicy(BaseClientSubnetPolicy):
 
         if not subnet:
             if not self.get_public_ip_called:
-                def set_server_public_ip(ip):
-                    self.server_public_ip = ip
-
                 self.get_public_ip_called = True
-                get_public_ip().addCallback(set_server_public_ip)
-
+                self.get_server_public_ip(self.retry_intevals)
             if self.server_public_ip:
                 subnet = ip_network(self.server_public_ip)
                 logger.debug('got client_subnet from server ip: %s', subnet)
@@ -158,6 +163,21 @@ class AutoDiscoveryPolicy(BaseClientSubnetPolicy):
                 logger.debug('client_subnet truncated to %s', subnet)
 
         return subnet
+
+    def get_server_public_ip(self, retry_intevals):
+        self.request_d = get_public_ip().addCallback(self.set_server_public_ip, retry_intevals)
+
+    def set_server_public_ip(self, ip, retry_intevals):
+        if ip:
+            self.server_public_ip = ip
+            logger.debug('got server public ip: %s', ip)
+        else:
+            next_try, *remain_retry_intevals = retry_intevals
+            next_retry_intevals = remain_retry_intevals or (next_try,)  # infinite retry
+            self.retry_d = self.reactor.callLater(
+                next_try, self.get_server_public_ip, next_retry_intevals
+            )
+            logger.debug('failed to get server public ip, retry in %d sec.', next_try)
 
 
 class ExtendedDNSServerFactory(BugFixDNSServerFactory):

@@ -70,7 +70,7 @@ class BaseIpApi:
 
 
 class TaobaoIpApi(BaseIpApi):
-    API_URL = 'http://ip.taobao.com//service/getIpInfo.php?ip=myip'
+    API_URL = 'http://ip.taobao.com/service/getIpInfo.php?ip=myip'
 
     def decode(self, text: str):
         return ip_address(json.loads(text)['data']['ip'])

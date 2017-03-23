@@ -1,8 +1,10 @@
 from ipaddress import ip_network
+import logging
 import struct
 from typing import Union, Type
 
 import pytest
+from twisted.internet import task
 from twisted.internet.protocol import connectionDone
 from twisted.names import dns
 from twisted.python.failure import Failure
@@ -14,8 +16,13 @@ from dnsagent.resolver.extended import (
     OPTClientSubnetOption, BadOPTClientSubnetData, QueryList,
     ExtendedDNSProtocol, ExtendedDNSDatagramProtocol, EDNSMessage,
 )
-from dnsagent.server import ExtendedDNSServerFactory
-from dnsagent.tests import FakeTransport, FakeResolver
+from dnsagent.server import ExtendedDNSServerFactory, AutoDiscoveryPolicy
+from dnsagent.tests import (
+    FakeTransport, FakeResolver, clean_treq_connection_pool, require_internet,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 def test_opt_client_subnet_option_construct():
@@ -157,6 +164,43 @@ class TestClientSubnetWithExtendedResolver(BaseTestECSClientServer):
 
 class TestClientSubnetWithTCPExtendedResolver(BaseTestECSClientServer):
     resolver_cls = TCPExtendedResolver
+
+
+class TestAutoDiscoveryPolicy(unittest.TestCase):
+    def setUp(self):
+        self.clock = task.Clock()
+        self.policy = AutoDiscoveryPolicy(retry_intevals=(1, 2), reactor=self.clock)
+        self.pub_addr = ('1.2.3.4', 1234)
+
+        self.addCleanup(clean_treq_connection_pool)
+
+    def test_from_msg(self):
+        subnet = ip_network('2.3.0.0/16')
+        ecs_option = OPTClientSubnetOption.from_subnet(subnet)
+        assert self.policy(EDNSMessage(options=[ecs_option]), self.pub_addr) == subnet
+
+    def test_from_addr(self):
+        subnet = self.policy(EDNSMessage(), self.pub_addr)
+        net_string = '%s/%d' % (self.pub_addr[0], self.policy.max_prefix_lens[4])
+        assert subnet == ip_network(net_string, strict=False)
+
+    @require_internet
+    def test_from_get_public_ip(self):
+        subnet = self.policy(EDNSMessage(), ('192.168.1.1', 1111))
+        if subnet:
+            logger.info('got subnet from server ip immediately')
+        else:
+            def check(result):
+                if result is None:
+                    logger.error('get_public_ip() failed')
+                try:
+                    assert not self.policy.retry_d.called
+                    assert self.policy.retry_d.getTime() == 1
+                    assert result == self.policy.server_public_ip
+                finally:
+                    self.policy.retry_d.cancel()
+
+            return self.policy.request_d.addBoth(check)
 
 
 del BaseTestExtendedDNSXXXProtcol
