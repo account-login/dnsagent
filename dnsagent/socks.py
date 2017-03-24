@@ -30,13 +30,6 @@ logger = logging.getLogger(__name__)
 SocksHost = Union[IPv4Address, IPv6Address, str]
 
 
-def to_socks_host(host: str) -> SocksHost:
-    try:
-        return ip_address(host)
-    except ValueError:
-        return host
-
-
 class BadSocksHost(Exception):
     pass
 
@@ -44,6 +37,28 @@ class BadSocksHost(Exception):
 class InsufficientData(EOFError):
     pass
 
+
+class SocksError(Exception):
+    pass
+
+
+class BadSocks5Reply(SocksError):
+    pass
+
+
+class BadSocksVersion(SocksError):
+    pass
+
+
+class UnsupportedAuthMethod(SocksError):
+    pass
+
+
+def to_socks_host(host: str) -> SocksHost:
+    try:
+        return ip_address(host)
+    except ValueError:
+        return host
 
 def read_socks_host(data: BytesIO) -> SocksHost:
     atyp = data.read(1)
@@ -484,10 +499,6 @@ class TCPRelayConnector:
             self.user_proto.transport = None
 
 
-class BadSocks5Reply(Exception):
-    pass
-
-
 _Socks5Reply = NamedTuple(
     'Socks5Reply',
     [('reply', int), ('bind_host', SocksHost), ('bind_port', int)])
@@ -574,30 +585,32 @@ class Socks5ControlProtocol(Protocol):
     def check_greet_reply(self):
         assert self.state == 'greeted'
 
-        def fail():
+        try:
+            self._read_greet_reply()
+        except InsufficientData:
+            pass
+        except SocksError as exc:
+            logger.error('bad reply: %r', exc)
             self.data = b''
             self.state = 'failed'
-            self.auth_defer.errback(Failure(Exception('greeting failed')))
+            self.auth_defer.errback(Failure(exc))
+        else:
+            self.state = 'authed'
+            logger.debug('socks5 authed')
+            self.auth_defer.callback(self)
 
+    def _read_greet_reply(self):
         if len(self.data) < 2:
-            return
+            raise InsufficientData('greet reply')
 
-        ver = self.data[0]
-        if ver != 5:
-            logger.error('bad socks version: %r', ver)
-            fail()
-            return
-
-        method = self.data[1]
-        if method != 0:
-            logger.error('authentication required. method: %r', method)
-            fail()
-            return
-
+        version, method = self.data[:2]
         self.data = self.data[2:]
-        self.state = 'authed'
-        logger.debug('socks5 authed')
-        self.auth_defer.callback(self)
+
+        if version != 5:
+            raise BadSocksVersion(version)
+        if method != 0:
+            raise UnsupportedAuthMethod(method)
+        return version, method
 
     def _make_request(self, cmd: Socks5Cmd, dst_host: SocksHost, dst_port: int, next_state: str) \
             -> defer.Deferred:
