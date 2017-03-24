@@ -17,7 +17,6 @@ from dnsagent.resolver.bugfix import (
     BugFixDNSProtocol, BugFixDNSDatagramProtocol, BugFixDNSClientFactory, BugFixResolver,
 )
 from dnsagent.socks import SocksProxy, UDPRelay
-from dnsagent.utils import sequence_deferred_call
 
 
 __all__ = ('ExtendedResolver', 'TCPExtendedResolver')
@@ -337,33 +336,28 @@ class ExtendedResolver(ECSResolverMixin, BugFixResolver):
         super().__init__(resolv=resolv, servers=servers, timeout=timeout, reactor=reactor)
         self.socks_proxy = socks_proxy
 
-    def _got_udp_relay(self, relay: UDPRelay, query_args):
-        def stop_relay(ignore):
-            relay.stop()
-            return ignore
-
+    @defer.inlineCallbacks
+    def _query_with_udp_relay(self, relay: UDPRelay, query_args):
         proto = ExtendedDNSDatagramProtocol(self, reactor=self._reactor)
         relay.listenUDP(0, proto, maxPacketSize=512)
-        return proto.query(*query_args).addBoth(stop_relay)
+        try:
+            return (yield proto.query(*query_args))
+        finally:
+            relay.stop()
 
+    @defer.inlineCallbacks
     def _query(self, *args):
         """Run UDP query"""
         if self.socks_proxy is not None:
-            return sequence_deferred_call([
-                lambda ignore: self.socks_proxy.get_udp_relay(),
-                functools.partial(self._got_udp_relay, query_args=args),
-            ], 'ignore')
+            relay = yield self.socks_proxy.get_udp_relay()
+            return (yield self._query_with_udp_relay(relay, args))
         else:
-            def stop_listening(ignore):
-                protocol.transport.stopListening()
-                return ignore
-
             protocol = ExtendedDNSDatagramProtocol(self, reactor=self._reactor)
             self._reactor.listenUDP(0, protocol)
-
-            d = protocol.query(*args)
-            d.addBoth(stop_listening)
-            return d
+            try:
+                return (yield protocol.query(*args))
+            finally:
+                protocol.transport.stopListening()
 
     def connect_tcp(self, host: str, port: int, factory: ClientFactory):
         if self.socks_proxy:

@@ -678,15 +678,15 @@ class SocksProxy:
         self.host, self.port = host, port
         self.reactor = get_reactor(reactor)
 
+    @defer.inlineCallbacks
     def get_udp_relay(self):
         proxy_endpoint = get_client_endpoint(self.reactor, (self.host, self.port))
         ctrl_proto = Socks5ControlProtocol()
         relay = UDPRelay(ctrl_proto)
 
-        return sequence_deferred_call([
-            lambda: connectProtocol(proxy_endpoint, ctrl_proto),
-            relay.setup_relay,
-        ]).addCallback(lambda ignore: relay)
+        yield connectProtocol(proxy_endpoint, ctrl_proto)
+        yield relay.setup_relay()
+        return relay
 
     def connectTCP(
             self, host: str, port: int, factory: ClientFactory,

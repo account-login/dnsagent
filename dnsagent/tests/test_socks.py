@@ -36,8 +36,7 @@ from dnsagent.tests import (
     SSRunner,
 )
 from dnsagent.utils import (
-    get_reactor, get_client_endpoint, get_treq,
-    rrheader_to_ip, to_twisted_addr, chain_deferred_call,
+    get_reactor, get_client_endpoint, get_treq, rrheader_to_ip, to_twisted_addr,
 )
 
 
@@ -540,20 +539,18 @@ class BaseTestUDPRelayIntegrated(unittest.TestCase):
         raise NotImplementedError
 
     def setup_socks5_client(self):
-        def proxy_connected():
-            self.relay = UDPRelay(self.ctrl_proto)
-            return self.relay.setup_relay().addCallback(lambda ignore: self.relay)
+        self.relay_done = defer.maybeDeferred(self._setup_socks5_client)
 
-        self.relay_done = defer.Deferred()
+    @defer.inlineCallbacks
+    def _setup_socks5_client(self):
         proxy_endpoint = TCP4ClientEndpoint(
             self.reactor, self.proxy_host, self.proxy_port,
         )
         self.ctrl_proto = Socks5ControlProtocol()
-
-        chain_deferred_call([
-            lambda: connectProtocol(proxy_endpoint, self.ctrl_proto),
-            proxy_connected,
-        ], self.relay_done)
+        yield connectProtocol(proxy_endpoint, self.ctrl_proto)
+        self.relay = UDPRelay(self.ctrl_proto)
+        yield self.relay.setup_relay()
+        return self.relay
 
     def tearDown(self):
         return self.relay.stop()
@@ -599,11 +596,10 @@ class TestUDPRelayWithSS(BaseTestUDPRelayIntegrated):
 
     proxy_host, proxy_port = SSRunner.ss_client_host, SSRunner.ss_client_port
 
+    @defer.inlineCallbacks
     def setUp(self):
-        return chain_deferred_call([
-            SSRunner.start,
-            super(TestUDPRelayWithSS, self).setUp,
-        ])
+        yield SSRunner.start()
+        return (yield super(TestUDPRelayWithSS, self).setUp())
 
     def setup_socks5_server(self):
         pass

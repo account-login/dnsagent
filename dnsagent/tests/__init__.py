@@ -287,7 +287,7 @@ def need_clean_treq_function(func: Callable):
     @defer.inlineCallbacks
     def wrapped(*args, **kwargs):
         try:
-            yield defer.maybeDeferred(func, *args, **kwargs)
+            return (yield defer.maybeDeferred(func, *args, **kwargs))
         finally:
             yield clean_treq_connection_pool()
 

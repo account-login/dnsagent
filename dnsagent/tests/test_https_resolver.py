@@ -238,7 +238,7 @@ class TestHTTPSResolverWithLocalServer(BaseTestResolver):
     @defer.inlineCallbacks
     def tearDown(self):
         try:
-            yield super().tearDown()
+            return (yield super().tearDown())
         finally:
             yield defer.maybeDeferred(self.server_transport.stopListening)
 
@@ -263,17 +263,15 @@ class TestHTTPSResolverWithGoogle(BaseTestResolver):
 
     @defer.inlineCallbacks
     def run_test(self, subnet: str, country: str):
-        def check(result):
-            ans, auth, add = result
-            assert any(rr.type in (dns.A, dns.AAAA) for rr in ans)
-            for rr in ans:
-                ip = rrheader_to_ip(rr)
-                if ip:
-                    assert iprir.by_ip(ip).country == country
-
         query_kwargs = dict(client_subnet=ip_network(subnet), timeout=(2,))
-        d = self.check_a('img.alicdn.com', query_kwargs=query_kwargs)
-        yield d.addCallback(check)
+        result = yield self.check_a('img.alicdn.com', query_kwargs=query_kwargs)
+
+        ans, auth, add = result
+        assert any(rr.type in (dns.A, dns.AAAA) for rr in ans)
+        for rr in ans:
+            ip = rrheader_to_ip(rr)
+            if ip:
+                assert iprir.by_ip(ip).country == country
 
     @need_clean_treq
     @defer.inlineCallbacks
