@@ -195,11 +195,14 @@ class TestAutoDiscoveryPolicy(unittest.TestCase):
                 if result is None:
                     logger.error('get_public_ip() failed')
                 try:
-                    assert not self.policy.retry_d.called
-                    assert self.policy.retry_d.getTime() == 1
+                    if self.policy.retry_d:
+                        assert result is None
+                        assert not self.policy.retry_d.called
+                        assert self.policy.retry_d.getTime() == 1
                     assert result == self.policy.server_public_ip
                 finally:
-                    self.policy.retry_d.cancel()
+                    if self.policy.retry_d:
+                        self.policy.retry_d.cancel()
 
             return self.policy.request_d.addBoth(check)
 
