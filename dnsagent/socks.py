@@ -17,7 +17,8 @@ from twisted.python.failure import Failure
 from zope.interface import implementer
 
 from dnsagent.utils import (
-    get_reactor, get_client_endpoint, to_twisted_addr, patch_twisted_ssl_root_bug, chain_deferred_call,
+    get_reactor, get_client_endpoint, to_twisted_addr,
+    patch_twisted_ssl_root_bug, sequence_deferred_call,
 )
 
 # TODO: timeout?
@@ -328,11 +329,12 @@ class UDPRelay:
                 ip_address(client_host), client_port,
             )
 
-        return chain_deferred_call([
+        sequence_deferred_call([
             lambda ignore: self.ctrl_proto.auth_defer,
             do_request,
             connect_relay,
-        ], self.relay_defer, 'ignore')
+        ], 'ignore').chainDeferred(self.relay_defer)
+        return self.relay_defer
 
     def listenUDP(self, port: int, protocol: DatagramProtocol, interface='', maxPacketSize=8192):
         """
@@ -681,7 +683,7 @@ class SocksProxy:
         ctrl_proto = Socks5ControlProtocol()
         relay = UDPRelay(ctrl_proto)
 
-        return chain_deferred_call([
+        return sequence_deferred_call([
             lambda: connectProtocol(proxy_endpoint, ctrl_proto),
             relay.setup_relay,
         ]).addCallback(lambda ignore: relay)

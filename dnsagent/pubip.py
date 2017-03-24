@@ -7,7 +7,7 @@ from typing import Optional, Sequence
 import netifaces
 from twisted.internet import defer
 
-from dnsagent.utils import chain_deferred_call, get_treq
+from dnsagent.utils import sequence_deferred_call, get_treq
 
 
 logger = logging.getLogger(__name__)
@@ -58,11 +58,11 @@ class BaseIpApi:
 
     def get_ip(self) -> defer.Deferred:
         treq = get_treq()
-        return chain_deferred_call([
+        return sequence_deferred_call([
             treq.get,
             treq.text_content,
             self.decode,
-        ], defer.Deferred(), self.API_URL)
+        ], self.API_URL)
 
     def decode(self, text: str) -> IPv4Address:
         matched = next(re.finditer(r'\d+\.\d+\.\d+\.\d+', text))

@@ -9,7 +9,7 @@ from dnsagent.pubip import (
     get_public_ip, get_public_ip_from_netifaces, get_public_ip_from_web_api,
     BaseIpApi, DEFAULT_IP_APIS,
 )
-from dnsagent.tests import require_internet, clean_treq_connection_pool
+from dnsagent.tests import require_internet, need_clean_treq
 
 
 logger = logging.getLogger(__name__)
@@ -24,15 +24,14 @@ def test_get_public_ip_from_netifaces():
 
 
 @require_internet
+@need_clean_treq
 class TestAllPublicIpWebApi(unittest.TestCase):
+    @defer.inlineCallbacks
     def test_run(self):
-        return defer.DeferredList(
+        yield defer.DeferredList(
             [api.get_ip() for api in DEFAULT_IP_APIS],
             fireOnOneErrback=True,
         )
-
-    def tearDown(self):
-        return clean_treq_connection_pool()
 
 
 class FailedApi(BaseIpApi):
@@ -45,36 +44,29 @@ class FakeApi(BaseIpApi):
         return defer.succeed(ip_address('1.2.3.4'))
 
 
+@need_clean_treq
 class TestGetPublicIpFromWebApi(unittest.TestCase):
+    @defer.inlineCallbacks
     def test_all_fail(self):
-        def check(result):
-            assert result is None
-
         apis = [FailedApi(), FailedApi()]
-        d = get_public_ip_from_web_api(apis)
-        return d.addCallback(check)
+        ip = yield get_public_ip_from_web_api(apis)
+        assert ip is None
 
+    @defer.inlineCallbacks
     def test_partial_fail(self):
-        def check(result):
-            assert result == ip_address('1.2.3.4')
-
         apis = [FailedApi(), FakeApi()]
-        d = get_public_ip_from_web_api(apis)
-        return d.addCallback(check)
+        ip = yield get_public_ip_from_web_api(apis)
+        assert ip == ip_address('1.2.3.4')
 
     @require_internet
+    @defer.inlineCallbacks
     def test_default(self):
-        def check(result):
-            logger.info('public ip from web api: %s', result)
-
-        d = get_public_ip_from_web_api()
-        return d.addCallback(check)
-
-    def tearDown(self):
-        return clean_treq_connection_pool()
+        ip = yield get_public_ip_from_web_api()
+        logger.info('public ip from web api: %s', ip)
 
 
 @require_internet
+@need_clean_treq
 class TestGetPublicIp(unittest.TestCase):
     def test_run(self):
         def check(ip):
@@ -85,6 +77,3 @@ class TestGetPublicIp(unittest.TestCase):
 
         d = get_public_ip()
         return d.addCallback(check)
-
-    def tearDown(self):
-        return clean_treq_connection_pool()

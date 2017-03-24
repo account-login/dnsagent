@@ -1,12 +1,11 @@
 import urllib.parse
 from typing import Dict, List
 
-from twisted.internet import defer
 from twisted.names import dns
 
 from dnsagent import logger
 from dnsagent.resolver import BaseResolver
-from dnsagent.utils import patch_twisted_ssl_root_bug, chain_deferred_call, get_treq
+from dnsagent.utils import patch_twisted_ssl_root_bug, sequence_deferred_call, get_treq
 
 
 __all__ = ('HTTPSResolver',)
@@ -39,10 +38,10 @@ class HTTPSResolver(BaseResolver):
     def make_request(self, name: bytes, cls, type_, timeout, **kwargs):
         treq = get_treq()
         url = self.make_request_url(name, cls, type_, **kwargs)
-        return chain_deferred_call([
+        return sequence_deferred_call([
             self.http_client.get,
             treq.json_content,
-        ], defer.Deferred(), url)
+        ], url)
 
     def make_request_url(self, name: bytes, cls, type_, *, client_subnet=None, **kwargs):
         param = dict(name=name, type=type_)

@@ -1,9 +1,11 @@
+import functools
+import inspect
 from ipaddress import ip_address, IPv4Address, IPv6Address
 import logging
 import os
 import subprocess
 import types
-from typing import Tuple, Sequence
+from typing import Tuple, Sequence, Callable, Type
 
 import pytest
 from twisted.internet import defer
@@ -278,6 +280,32 @@ def clean_treq_connection_pool():
     pool = treq._utils.get_global_pool()
     if pool:
         return pool.closeCachedConnections()
+
+
+def need_clean_treq_function(func: Callable):
+    @functools.wraps(func)
+    @defer.inlineCallbacks
+    def wrapped(*args, **kwargs):
+        try:
+            yield defer.maybeDeferred(func, *args, **kwargs)
+        finally:
+            yield clean_treq_connection_pool()
+
+    return wrapped
+
+
+def need_clean_treq_class(cls: Type[unittest.TestCase]):
+    for name, method in inspect.getmembers(cls, inspect.isfunction):
+        if name.startswith('test'):
+            setattr(cls, name, need_clean_treq_function(method))
+    return cls
+
+
+def need_clean_treq(cls_or_func):
+    if isinstance(cls_or_func, type):
+        return need_clean_treq_class(cls_or_func)
+    else:
+        return need_clean_treq_function(cls_or_func)
 
 
 class SSRunner:

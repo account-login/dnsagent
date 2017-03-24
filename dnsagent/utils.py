@@ -304,3 +304,17 @@ def chain_deferred_call(
         d.addErrback(final_d.errback)
 
     return final_d
+
+
+@defer.inlineCallbacks
+def sequence_deferred_call(funcs: Sequence[Callable], result=_NONE):
+    for func in funcs:
+        if result is _NONE:
+            yield defer.maybeDeferred(func)
+        else:
+            result = yield defer.maybeDeferred(func, result)
+
+    if result is _NONE:
+        return
+    else:
+        return result

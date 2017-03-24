@@ -19,7 +19,7 @@ from dnsagent.resolver.extended import (
 )
 from dnsagent.server import ExtendedDNSServerFactory, AutoDiscoveryPolicy
 from dnsagent.tests import (
-    FakeTransport, FakeResolver, clean_treq_connection_pool, require_internet, swap_function,
+    FakeTransport, FakeResolver, need_clean_treq, require_internet, swap_function,
 )
 
 
@@ -173,8 +173,6 @@ class TestAutoDiscoveryPolicy(unittest.TestCase):
         self.policy = AutoDiscoveryPolicy(retry_intevals=(1, 2), reactor=self.clock)
         self.pub_addr = ('1.2.3.4', 1234)
 
-        self.addCleanup(clean_treq_connection_pool)
-
     def test_from_msg(self):
         subnet = ip_network('2.3.0.0/16')
         ecs_option = OPTClientSubnetOption.from_subnet(subnet)
@@ -186,25 +184,25 @@ class TestAutoDiscoveryPolicy(unittest.TestCase):
         assert subnet == ip_network(net_string, strict=False)
 
     @require_internet
+    @need_clean_treq
+    @defer.inlineCallbacks
     def test_from_get_public_ip(self):
         subnet = self.policy(EDNSMessage(), ('192.168.1.1', 1111))
         if subnet:
             logger.info('got subnet from server ip immediately')
         else:
-            def check(result):
-                if result is None:
-                    logger.error('get_public_ip() failed')
-                try:
-                    if self.policy.retry_d:
-                        assert result is None
-                        assert not self.policy.retry_d.called
-                        assert self.policy.retry_d.getTime() == 1
-                    assert result == self.policy.server_public_ip
-                finally:
-                    if self.policy.retry_d:
-                        self.policy.retry_d.cancel()
-
-            return self.policy.request_d.addBoth(check)
+            result = yield self.policy.request_d
+            if result is None:
+                logger.error('get_public_ip() failed')
+            try:
+                if self.policy.retry_d:
+                    assert result is None
+                    assert not self.policy.retry_d.called
+                    assert self.policy.retry_d.getTime() == 1
+                assert result == self.policy.server_public_ip
+            finally:
+                if self.policy.retry_d:
+                    self.policy.retry_d.cancel()
 
     def test_fallback(self):
         def fake_get_public_ip():

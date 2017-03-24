@@ -1,8 +1,9 @@
 import pytest
+from twisted.internet import defer
 from twisted.trial import unittest
 
 from dnsagent.config import parse_dns_server_string, DnsServerInfo
-from dnsagent.tests import clean_treq_connection_pool, require_internet
+from dnsagent.tests import need_clean_treq, require_internet
 from dnsagent.utils import BadURL, parse_url, ParsedURL, patch_twisted_ssl_root_bug, get_treq
 
 
@@ -58,16 +59,13 @@ class TestTwistedSSLBug(unittest.TestCase):
     def setUp(self):
         patch_twisted_ssl_root_bug()
 
-    def tearDown(self):
-        return clean_treq_connection_pool()
-
+    @need_clean_treq
+    @defer.inlineCallbacks
     def test_run(self):
-        def check(text):
-            assert len(text) > 10
-
         treq = get_treq()
-        d = treq.get('https://example.com/')
-        return d.addCallback(treq.text_content).addCallback(check)
+        response = yield treq.get('https://example.com/')
+        text = yield treq.text_content(response)
+        assert len(text) > 10
 
 
 del BaseTestParseURL

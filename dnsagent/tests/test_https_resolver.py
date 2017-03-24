@@ -14,10 +14,9 @@ from twisted.web.server import Site
 from dnsagent.config import https
 from dnsagent.resolver.https import HTTPSResolver, BadRData
 from dnsagent.tests import (
-    make_rrheader, BaseTestResolver, iplist, clean_treq_connection_pool,
-    require_internet, SSRunner,
+    make_rrheader, BaseTestResolver, iplist, need_clean_treq, require_internet, SSRunner,
 )
-from dnsagent.utils import get_reactor, rrheader_to_ip, chain_deferred_call
+from dnsagent.utils import get_reactor, rrheader_to_ip
 
 
 def test_split_rdata():
@@ -235,15 +234,13 @@ class TestHTTPSResolverWithLocalServer(BaseTestResolver):
         host, port = LocalHTTPSResolver.server_host, LocalHTTPSResolver.server_port
         self.server_transport = reactor.listenTCP(port, site, interface=host)
 
+    @need_clean_treq
+    @defer.inlineCallbacks
     def tearDown(self):
-        return chain_deferred_call([
-            super().tearDown,
-            lambda: defer.DeferredList([
-                defer.maybeDeferred(self.server_transport.stopListening),
-                # XXX: hacks to clean delayed call
-                clean_treq_connection_pool(),
-            ], fireOnOneErrback=True),
-        ])
+        try:
+            yield super().tearDown()
+        finally:
+            yield defer.maybeDeferred(self.server_transport.stopListening)
 
     def test_run(self):
         self.check_a('apple.com', iplist('17.178.96.59'))
@@ -264,12 +261,7 @@ class TestHTTPSResolverWithGoogle(BaseTestResolver):
         self.resolver = https(proxy=proxy)
         return d
 
-    def tearDown(self):
-        return chain_deferred_call([
-            super().tearDown,
-            clean_treq_connection_pool,
-        ])
-
+    @defer.inlineCallbacks
     def run_test(self, subnet: str, country: str):
         def check(result):
             ans, auth, add = result
@@ -281,11 +273,15 @@ class TestHTTPSResolverWithGoogle(BaseTestResolver):
 
         query_kwargs = dict(client_subnet=ip_network(subnet), timeout=(2,))
         d = self.check_a('img.alicdn.com', query_kwargs=query_kwargs)
-        d.addCallback(check)
+        yield d.addCallback(check)
 
+    @need_clean_treq
+    @defer.inlineCallbacks
     def test_run(self):
-        self.run_test('114.114.114.0/24', 'CN')
-        self.run_test('8.8.8.0/24', 'US')
+        yield defer.DeferredList([
+            self.run_test('114.114.114.0/24', 'CN'),
+            self.run_test('8.8.8.0/24', 'US')
+        ], fireOnOneErrback=True)
 
 
 def tearDownModule():

@@ -5,7 +5,7 @@ from twisted.names import dns
 
 from dnsagent.resolver import CachingResolver
 from dnsagent.tests import BaseTestResolver, FakeResolver, iplist
-from dnsagent.utils import rrheader_to_ip, chain_deferred_call
+from dnsagent.utils import rrheader_to_ip, sequence_deferred_call
 
 
 class TestCachingResolver(BaseTestResolver):
@@ -44,7 +44,7 @@ class TestCachingResolver(BaseTestResolver):
             self.clock.advance(31)
             assert len(self.resolver.cache) == len(self.resolver.cancel) == 0
 
-        return chain_deferred_call([
+        return sequence_deferred_call([
             lambda: self.check_a('asdf', iplist('0.0.0.1')),
             check_cached,
             check_expired_1,
