@@ -185,6 +185,8 @@ class AutoDiscoveryPolicy(BaseClientSubnetPolicy):
             )
             logger.debug('failed to get server public ip, retry in %d sec.', next_try)
 
+        return ip   # for test
+
 
 class ExtendedDNSServerFactory(BugFixDNSServerFactory):
     # TODO: respond with edns message
