@@ -92,6 +92,7 @@ ENV/
 # TZ
 /.idea/
 /conf*.py
+!conftest.py
 /*.pcapng
 /*.txt
 !requirements*.txt

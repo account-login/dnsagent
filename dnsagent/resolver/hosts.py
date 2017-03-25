@@ -1,6 +1,6 @@
 from collections import defaultdict
 from ipaddress import ip_address, IPv4Address, IPv6Address
-from typing import Mapping, Union, List
+from typing import Dict, Union, List
 
 from twisted.internet import defer
 from twisted.names import dns
@@ -14,7 +14,7 @@ from dnsagent.utils import watch_modification
 __all__ = ('HostsResolver',)
 
 
-Name2IpListType = Mapping[str, List[Union[IPv4Address, IPv6Address]]]
+Name2IpListType = Dict[str, List[Union[IPv4Address, IPv6Address]]]
 
 
 def validate_domain_name(name: str):
@@ -66,7 +66,7 @@ class HostsResolver(BaseResolver):
 
     ref: twisted.names.hosts.Resolver
     """
-    def __init__(self, *, filename=None, mapping: Mapping[str, str]=None, ttl=60*60, reload=False):
+    def __init__(self, *, filename=None, mapping=None, ttl=60*60, reload=False):
         super().__init__()
         self.filename = filename
         self.ttl = ttl
@@ -77,10 +77,11 @@ class HostsResolver(BaseResolver):
             if reload:
                 watch_modification(filename, self._load_hosts)
         elif mapping is not None:
-            self.name2iplist = {    # type: Name2IpListType
-                domain.lower(): [ ip_address(ip) ]
-                for domain, ip in mapping.items()
-            }
+            self.name2iplist = dict()   # type: Name2IpListType
+            for domain, value in mapping.items():
+                if isinstance(value, str):
+                    value = [value]
+                self.name2iplist[domain.lower()] = [ip_address(ip) for ip in value]
 
     def _load_hosts(self):
         logger.debug('loading hosts file: %s', self.filename)

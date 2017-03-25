@@ -58,12 +58,17 @@ class TestHostsResolver(BaseTestResolver):
 class TestHostResolverMapping(BaseTestResolver):
     def setUp(self):
         super().setUp()
-        self.resolver = HostsResolver(mapping=dict(ASDF='1.2.3.4', localhost='::1'))
+        self.resolver = HostsResolver(mapping=dict(
+            ASDF='1.2.3.4', localhost='::1',
+            bbb=['3.4.5.6', '::1'],
+        ))
 
     def test_resolve(self):
         self.check_a('asdf', iplist('1.2.3.4'))
         self.check_aaaa('LocalHost', iplist('::1'))
         self.check_a('qwer', fail=True)
+        self.check_all('bbb', iplist('3.4.5.6', '::1'))
+        self.check_aaaa('bbb', iplist('::1'))
 
 
 def test_config_hosts():
