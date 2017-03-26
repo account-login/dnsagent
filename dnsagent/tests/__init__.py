@@ -130,13 +130,15 @@ class BaseTestResolver(unittest.TestCase):
 
             ans, auth, add = result
             assert [rrheader_to_ip(rr) for rr in ans] == expect
+            return result
 
-        def failed(failure: Failure):
-            logger.info('query %r failed: %s', query, failure)
+        def failed(err: Failure):
+            logger.info('query %r failed: %s', query, err)
             if not fail:
                 self.fail('query failed unexpectly')
             if isinstance(fail, type) and issubclass(fail, Exception):
-                assert isinstance(failure.value, fail), 'Failure type mismatch'
+                assert isinstance(err.value, fail), 'Failure type mismatch'
+            return err
 
         query_kwargs = query_kwargs or dict()
         query_kwargs.setdefault('timeout', (0.5,))

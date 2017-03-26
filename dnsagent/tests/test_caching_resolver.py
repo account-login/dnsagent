@@ -187,5 +187,15 @@ class TestCachingResolver(BaseTestResolver):
         yield self.check_a('asdf', iplist('1.2.3.4'))
         assert len(self.resolver.cache) == 0
 
+    @defer.inlineCallbacks
+    def test_ttl_decrease(self):
+        self.fake_resolver.set_multiple_answer('asdf', [('1.2.3.4', 10), ('4.3.2.1', 15)])
+        yield self.check_a('asdf', iplist('1.2.3.4', '4.3.2.1'))
+
+        self.clock.advance(2)
+        ans, ns, add = yield self.check_a('asdf', iplist('1.2.3.4', '4.3.2.1'))
+        assert ans[0].ttl == 8
+        assert ans[1].ttl == 13
+
 
 del BaseTestResolver

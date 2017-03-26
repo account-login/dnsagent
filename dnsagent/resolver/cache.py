@@ -145,10 +145,17 @@ class TTLCache:
         self.delayed_calls.clear()
 
 
-def rrheader_update_ttl(rr: dns.RRHeader, new_ttl):
+def rrheader_adjust_ttl(rr: dns.RRHeader, diff):
     return dns.RRHeader(
-        name=rr.name.name, type=rr.type, cls=rr.cls, ttl=int(new_ttl),
-        payload=rr.payload,
+        name=rr.name.name, type=rr.type, cls=rr.cls, ttl=int(rr.ttl + diff),
+        payload=rr.payload,     # FIXME: update ttl in payload
+    )
+
+
+def query_result_adjust_ttl(result, diff):
+    return tuple(
+        [rrheader_adjust_ttl(r, diff) for r in rrlist]
+        for rrlist in result
     )
 
 
@@ -180,12 +187,12 @@ class CachingResolver(BaseResolver):
             logger.debug('[%d]adding to cache: %r', kwargs.get('request_id', -1), query)
             minttl = min((rr.ttl for rr in chain.from_iterable(result)), default=0)
             if minttl > 0:
-                self.cache.put(query, result, minttl)
+                self.cache.put(query, query_result_adjust_ttl(result, -minttl), minttl)
             return result
         else:
             assert ttl >= 0
             logger.debug('[%d]cache hit: %s', request_id, name.decode('latin1'))
-            return tuple([rrheader_update_ttl(r, ttl) for r in rrlist] for rrlist in result)
+            return query_result_adjust_ttl(result, ttl)
 
     def clear(self):
         self.cache.clear()
