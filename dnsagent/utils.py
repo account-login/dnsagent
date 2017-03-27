@@ -143,37 +143,27 @@ def repr_short(obj):
         return method()
 
 
-def wait_for_tcp(addr: Tuple[str, int], retries=20, timeout=0.2, d=None, logger=None):
-    def connected(result):
-        plogger.debug('server is up')
-        protocol.transport.loseConnection()
-        d.callback(addr)
-        return result
+@defer.inlineCallbacks
+def wait_for_tcp(addr: Tuple[str, int], retries=20, timeout=0.2, logger=None, reactor=None):
+    while True:
+        reactor = get_reactor(reactor)
+        logger = logger or logging.getLogger(__name__)
+        plogger = PrefixedLogger(logger, 'wait_for_tcp(%r): ' % (addr,))
 
-    def failed(ignore):
-        plogger.debug('server is down. retries left: %d', retries - 1)
-        reactor.callLater(
-            timeout, wait_for_tcp,
-            addr=addr, retries=(retries - 1), timeout=timeout, d=d, logger=logger,
-        )
-
-    reactor = get_reactor()
-    d = d or defer.Deferred()
-    logger = logger or logging.getLogger(__name__)
-    plogger = PrefixedLogger(logger, 'wait_for_tcp(%r): ' % (addr,))
-
-    if retries <= 0:
-        d.errback(Exception('wait_for_tcp(%r): server not started' % (addr,)))
-    else:
+        endpoint = get_client_endpoint(reactor, addr, timeout=timeout)
         protocol = Protocol()
-        connect_d = connectProtocol(
-            get_client_endpoint(
-                reactor, addr, timeout=timeout),
-            protocol,
-        )
-        connect_d.addCallbacks(connected, failed)
-
-    return d
+        try:
+            yield connectProtocol(endpoint, protocol)
+        except:
+            plogger.debug('server is down. retries left: %d', retries)
+            if retries <= 0:
+                raise Exception('wait_for_tcp(%r): server not started' % (addr,))
+            retries -= 1
+            yield async_sleep(timeout, reactor=reactor)
+        else:
+            plogger.debug('server is up')
+            protocol.transport.loseConnection()
+            return addr
 
 
 def get_client_endpoint(reactor, addr: Tuple[str, int], **kwargs):
