@@ -1,10 +1,12 @@
 import pytest
-from twisted.internet import defer
+from twisted.internet import defer, task
 from twisted.trial import unittest
 
 from dnsagent.config import parse_dns_server_string, DnsServerInfo
 from dnsagent.tests import need_clean_treq, require_internet
-from dnsagent.utils import BadURL, parse_url, ParsedURL, patch_twisted_ssl_root_bug, get_treq
+from dnsagent.utils import (
+    BadURL, parse_url, ParsedURL, patch_twisted_ssl_root_bug, get_treq, async_sleep,
+)
 
 
 class BaseTestParseURL(unittest.TestCase):
@@ -66,6 +68,13 @@ class TestTwistedSSLBug(unittest.TestCase):
         response = yield treq.get('https://example.com/')
         text = yield treq.text_content(response)
         assert len(text) > 10
+
+
+def test_async_sleep():
+    clock = task.Clock()
+    d = async_sleep(1, reactor=clock)
+    clock.advance(1)
+    assert d.called
 
 
 del BaseTestParseURL

@@ -1,3 +1,5 @@
+from functools import partial
+
 from twisted.internet import defer, task
 from twisted.internet.error import ConnectionDone
 from twisted.internet.protocol import DatagramProtocol
@@ -12,7 +14,7 @@ from dnsagent.resolver.extended import (
 )
 from dnsagent.server import BugFixDNSServerFactory
 from dnsagent.tests import BaseTestResolver, FakeResolver, iplist, FakeTransport
-from dnsagent.utils import get_reactor
+from dnsagent.utils import get_reactor, sequence_deferred_call, async_sleep
 
 
 class LoseConnectionDNSServerFactory(BugFixDNSServerFactory):
@@ -59,33 +61,33 @@ class TestTCPBugFixResolver(BaseTestResolver):
             yield self.app.stop()
 
     def test_success(self):
-        def check_waiting_state():
-            assert not self.resolver.pending
-            assert len(self.resolver.tcp_waiting) == 2
-
-        def check_finished_state(ignore):
+        def check_finished_state():
             assert not self.resolver.pending
             assert not self.resolver.tcp_waiting
-            self.reactor.callLater(0.002,
-                lambda: defer.maybeDeferred(check_disconnected)
-                    .chainDeferred(final_d))
 
         def check_disconnected():
             assert not self.resolver.tcp_protocol
 
-        final_d = defer.Deferred()
-        query_d = defer.DeferredList([
-            self.check_a('asdf', iplist('1.2.3.4')),
-            self.check_a('fdsa', iplist('4.3.2.1')),
-        ], fireOnOneErrback=True)
-        query_d.addCallback(check_finished_state)
-        query_d.addErrback(final_d.errback)
+        def check_waiting_state():
+            assert not self.resolver.pending
+            assert len(self.resolver.tcp_waiting) == 2
 
-        self.reactor.callLater(0.005,
-            lambda: defer.maybeDeferred(check_waiting_state)
-                .addErrback(final_d.errback))
+        thread1 = sequence_deferred_call([
+            partial(defer.DeferredList, [
+                self.check_a('asdf', iplist('1.2.3.4')),
+                self.check_a('fdsa', iplist('4.3.2.1')),
+            ], fireOnOneErrback=True),
+            check_finished_state,
+            partial(async_sleep, 0.002),
+            check_disconnected,
+        ])
 
-        return final_d
+        thread2 = sequence_deferred_call([
+            partial(async_sleep, 0.005),
+            check_waiting_state,
+        ])
+
+        return defer.DeferredList([thread1, thread2], fireOnOneErrback=True)
 
     def test_connection_lost(self):
         self.server.countdown = 2

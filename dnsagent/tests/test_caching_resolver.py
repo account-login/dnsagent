@@ -1,3 +1,4 @@
+from functools import partial
 from ipaddress import IPv4Address
 
 import pytest
@@ -176,7 +177,7 @@ class TestCachingResolver(BaseTestResolver):
             return self.check_a('asdf', iplist('0.0.0.2'))
 
         return sequence_deferred_call([
-            lambda: self.check_a('asdf', iplist('0.0.0.1')),
+            partial(self.check_a, 'asdf', iplist('0.0.0.1')),
             check_cached,
             check_expired,
         ])

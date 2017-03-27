@@ -295,3 +295,10 @@ def sequence_deferred_call(funcs: Sequence[Callable], result=_NONE):
         return
     else:
         return result
+
+
+def async_sleep(seconds: float, reactor=None):
+    reactor = get_reactor(reactor)
+    d = defer.Deferred()
+    reactor.callLater(seconds, d.callback, seconds)
+    return d
