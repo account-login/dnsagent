@@ -138,7 +138,6 @@ class BaseTestResolver(unittest.TestCase):
                 self.fail('query failed unexpectly')
             if isinstance(fail, type) and issubclass(fail, Exception):
                 assert isinstance(err.value, fail), 'Failure type mismatch'
-            return err
 
         query_kwargs = query_kwargs or dict()
         query_kwargs.setdefault('timeout', (0.5,))
