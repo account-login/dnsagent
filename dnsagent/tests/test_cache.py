@@ -2,174 +2,105 @@ import pytest
 from twisted.internet import task
 from twisted.trial import unittest
 
-from dnsagent.cache import heap_left, heap_right, MinSet, LFUPolicy, LRUPolicy, TTLCache
-from dnsagent.tests.datagen import gen_sort_case
+from dnsagent.cache import LinkedList, LLNode, LFUPolicy, LRUPolicy, TTLCache
 
 
-def verify_heap(heap, key):
-    for parent in range(len(heap) // 2):
-        for child in (heap_left(parent), heap_right(parent)):
-            if child < len(heap):
-                assert key(heap[parent]) <= key(heap[child])
-
-
-class TestMinSet(unittest.TestCase):
+class TestLinkedList(unittest.TestCase):
     def setUp(self):
-        self.key = lambda x: x[0]
-        self.minset = MinSet(key=self.key)
-        self.refmap = dict()
+        self.ll = LinkedList()
 
-    def verify(self, values):
-        verify_heap(self.minset.heap, self.key)
-        assert sorted(self.minset.map.values()) == list(range(len(self.minset.heap)))
-        for key, index in self.minset.map.items():
-            assert self.key(self.minset.heap[index]) == key
+    def check(self, items):
+        node = self.ll
+        while node.next:
+            assert node.next.prev is node
+            node = node.next
+        if not items:
+            assert self.ll.tail is None
+        else:
+            assert self.ll.tail is node
 
-        assert sorted(self.minset.heap, key=self.key) == sorted(values, key=self.key)
+        assert list(self.ll) == list(items)
 
-    def clear(self):
-        self.minset.clear()
-        self.refmap.clear()
+    def test_insert_head(self):
+        self.check([])
+        for i in range(5):
+            self.ll.insert_head(i)
+            self.check(reversed(range(i + 1)))
 
-    def push(self, value):
-        self.minset.push(value)
-        self.refmap[self.key(value)] = value
+    def test_remove_node(self):
+        for to_remove in range(5):
+            self.ll.clear()
+            nodes = []
+            for i in range(5):
+                nodes.append(self.ll.insert_head(i))
+            nodes.reverse()
 
-    def remove(self, value):
-        self.minset.remove(value)
-        del self.refmap[self.key(value)]
+            self.ll.remove_node(nodes[to_remove])
+            self.check([node.data for index, node in enumerate(nodes) if index != to_remove])
 
-    def increase(self, index, to):
-        old = self.minset.heap[index]
-        self.minset.increase(index, to)
-        del self.refmap[self.key(old)]
-        self.refmap[self.key(to)] = to
+    def test_insert_after(self):
+        for pos in range(5):
+            self.ll.clear()
+            nodes = []
+            for i in range(5):
+                nodes.append(self.ll.insert_head(i))
+            nodes.reverse()
 
-    def decrease(self, index, to):
-        old = self.minset.heap[index]
-        self.minset.decrease(index, to)
-        del self.refmap[self.key(old)]
-        self.refmap[self.key(to)] = to
+            self.ll.insert_node_after(nodes[pos], LLNode(10))
+            lst = list(reversed(range(5)))
+            lst.insert(pos + 1, 10)
+            self.check(lst)
 
-    def test_push(self):
-        for case in gen_sort_case(7):
-            for num in case:
-                self.push((num, object()))
-                self.verify(self.refmap.values())
-
-            self.clear()
-
-    def test_remove(self):
-        for case in gen_sort_case(7):
-            for num in case:
-                self.push((num, object()))
-            minset = self.minset.copy()
-            refmap = self.refmap.copy()
-
-            for num in case:
-                self.minset = minset.copy()
-                self.refmap = refmap.copy()
-                self.remove((num, object()))
-                self.verify(self.refmap.values())
-
-            self.clear()
-
-    def test_increase(self):
-        for case in gen_sort_case(7):
-            if len(case) == 0:
-                continue
-            for num in case:
-                self.push((num, object()))
-
-            minset = self.minset.copy()
-            refmap = self.refmap.copy()
-
-            for index, value in enumerate(minset.heap):
-                for to in range(self.key(value), max(case) + 1):
-                    self.minset = minset.copy()
-                    self.refmap = refmap.copy()
-                    self.increase(index, (to + 0.1, object()))
-                    self.verify(self.refmap.values())
-
-            self.clear()
-
-    def test_decrease(self):
-        for case in gen_sort_case(7):
-            if len(case) == 0:
-                continue
-            for num in case:
-                self.push((num, object()))
-
-            minset = self.minset.copy()
-            refmap = self.refmap.copy()
-
-            for index, value in enumerate(minset.heap):
-                for to in range(self.key(value), min(case) - 1, -1):
-                    self.minset = minset.copy()
-                    self.refmap = refmap.copy()
-                    self.decrease(index, (to - 0.1, object()))
-                    self.verify(self.refmap.values())
-
-            self.clear()
-
-    def test_poppush(self):
-        for x in [1, 2, 3]:
-            self.minset.push((x, None))
-        minset = self.minset.copy()
-
-        assert self.minset.poppush((0, None)) == (1, None)
-        self.verify((x, None) for x in [0, 2, 3])
-
-        self.minset = minset.copy()
-        assert self.minset.poppush((1, None)) == (1, None)
-        self.verify((x, None) for x in [1, 2, 3])
-
-        self.minset = minset.copy()
-        assert self.minset.poppush((2.5, None)) == (1, None)
-        self.verify((x, None) for x in [2, 2.5, 3])
+    def test_pop_tail(self):
+        for i in range(5):
+            self.ll.insert_head(i)
+        for i in range(5):
+            assert self.ll.pop_tail() == i
 
 
 class TestLFUPolicy(unittest.TestCase):
     def setUp(self):
         self.policy = LFUPolicy(maxsize=3)
 
-    def check_items(self, items):
-        assert items == self.policy.map
-        assert sorted(self.policy.minset.heap) == sorted(
-            (freq, serial, key) for key, (freq, serial) in items.items()
+    def check_items(self, *items):
+        assert items == tuple(
+            (freq, list(order_list))
+            for freq, order_list in self.policy.freq_list
         )
 
     def test_evict(self):
         assert self.policy.touch('a') is None
-        self.check_items(dict(a=(0, 1)))
+        self.check_items((1, list('a')))
 
         assert self.policy.touch('b') is None
         assert self.policy.touch('c') is None
-        self.check_items(dict(a=(0, 1), b=(0, 2), c=(0, 3)))
+        self.check_items((1, list('cba')))
 
         assert self.policy.touch('c') is None
-        self.check_items(dict(a=(0, 1), b=(0, 2), c=(1, 4)))
+        self.check_items((1, list('ba')), (2, list('c')))
         assert self.policy.touch('a') is None
-        self.check_items(dict(a=(1, 5), b=(0, 2), c=(1, 4)))
+        self.check_items((1, list('b')), (2, list('ac')))
 
         assert self.policy.touch('d') == 'b'
-        self.check_items(dict(a=(1, 5), c=(1, 4), d=(0, 6)))
+        self.check_items((1, list('d')), (2, list('ac')))
 
         self.policy.touch('d')
         assert self.policy.touch('e') == 'c'
-        self.check_items(dict(a=(1, 5), d=(1, 7), e=(0, 8)))
+        self.check_items((1, list('e')), (2, list('da')))
 
     def test_remove(self):
         for x in 'abc':
             self.policy.touch(x)
-        self.policy.remove('b')
-        self.check_items(dict(a=(0, 1), c=(0, 3)))
+        for x in 'ac':
+            self.policy.touch(x)
+        self.policy.remove('a')
+        self.check_items((1, ['b']), (2, ['c']))
 
     def test_clear(self):
         for x in 'abc':
             self.policy.touch(x)
         self.policy.clear()
-        self.check_items(dict())
+        self.check_items()
 
 
 class TestLRUPolicy(unittest.TestCase):

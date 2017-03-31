@@ -50,169 +50,157 @@ class LRUPolicy(BaseCachePolicy):
         self.od.clear()
 
 
-def heap_left(index):
-    return index * 2 + 1
+class LLNode:
+    __slots__ = ('data', 'prev', 'next')
+
+    def __init__(self, data):
+        self.data = data
+        self.prev = None
+        self.next = None
 
 
-def heap_right(index):
-    return index * 2 + 2
+def llnode_insert(node: LLNode, new_node: LLNode):
+    new_node.prev = node
+
+    new_node.next = node.next
+    if new_node.next is not None:
+        new_node.next.prev = new_node
+
+    node.next = new_node
 
 
-def heap_parent(index):
-    return (index - 1) // 2
+def llnode_remove(node: LLNode):
+    node.prev.next = node.next
+    if node.next is not None:
+        node.next.prev = node.prev
 
 
-class MinSet:
-    def __init__(self, key):
-        self.key = key
-        self.heap = []
-        self.map = dict()   # key -> index
+class LinkedList(LLNode):
+    def __init__(self):
+        super().__init__(None)
+        self.tail = None
 
-    def __len__(self):
-        return len(self.heap)
+    def get_head(self) -> LLNode:
+        if self.next is None:
+            raise ValueError('Empty LinkedList')
+        return self.next
 
-    def __contains__(self, item):
-        return self.key(item) in self.map
+    def insert_head(self, data) -> LLNode:
+        node = LLNode(data)
+        if self.tail is None:
+            self.tail = node
+        llnode_insert(self, node)
+        return node
 
-    def copy(self):
-        ret = type(self)(self.key)
-        ret.heap = self.heap.copy()
-        ret.map = self.map.copy()
-        return ret
+    def insert_node_after(self, node: LLNode, after: LLNode):
+        if node is self.tail:
+            self.tail = after
+        llnode_insert(node, after)
+
+    def remove_node(self, node: LLNode):
+        if node is self.tail:
+            self.tail = self.tail.prev
+            if self.tail is self:
+                self.tail = None
+        llnode_remove(node)
+
+    def pop_tail(self):
+        node = self.tail
+        self.tail = self.tail.prev
+        if self.tail is self:
+            self.tail = None
+        llnode_remove(node)
+        return node.data
+
+    def is_empty(self):
+        return self.next is None
 
     def clear(self):
-        self.heap.clear()
-        self.map.clear()
+        self.next = None
+        self.tail = None
 
-    def push(self, value):
-        key = self.key(value)
-        try:
-            index = self.map[key]
-        except KeyError:
-            index = len(self.heap)
-            self.heap.append(value)
-            self.map[self.key(value)] = index
-            self.decrease(index, value)
-        else:
-            origin_key = self.key(self.heap[index])
-            if key < origin_key:
-                self.decrease(index, value)
-            else:
-                self.increase(index, value)
-
-    def poppush(self, value):
-        ret = self.heap[0]
-        self.increase(0, value)     # no decrease needed since we are modifying root
-        return ret
-
-    def remove(self, value):
-        key = self.key(value)
-        index = self.map[key]
-        last = self.heap.pop()
-        if index == len(self.heap):     # remove last key
-            del self.map[key]
-        else:
-            if self.key(last) < key:
-                self.decrease(index, last)
-            else:
-                self.increase(index, last)
-
-    def decrease(self, index, replacement):
-        assert 0 <= index < len(self.heap)
-        del self.map[self.key(self.heap[index])]
-
-        key = self.key(replacement)
-        parent = heap_parent(index)
-        while parent >= 0:
-            parent_key = self.key(self.heap[parent])
-            if parent_key > key:    # push parent down
-                self.heap[index] = self.heap[parent]
-                self.map[parent_key] = index
-                parent, index = heap_parent(parent), parent
-            else:
-                break
-
-        self.heap[index] = replacement
-        self.map[key] = index
-
-    def decrease_value(self, old, new):
-        old_key = self.key(old)
-        assert old_key >= self.key(new)
-        index = self.map[old_key]
-        self.decrease(index, new)
-
-    def increase(self, index, replacement):
-        assert 0 <= index < len(self.heap)
-        del self.map[self.key(self.heap[index])]
-
-        replace_key = self.key(replacement)
-        min_index, min_key = index, replace_key
-        while True:
-            index = min_index
-            for child in (heap_left(index), heap_right(index)):
-                if child < len(self.heap):
-                    child_key = self.key(self.heap[child])
-                    if child_key < min_key:
-                        min_index, min_key = child, child_key
-
-            if min_index != index:  # pull up child
-                self.heap[index] = self.heap[min_index]
-                self.map[min_key] = index
-                min_key = replace_key
-            else:
-                break
-
-        self.heap[index] = replacement
-        self.map[replace_key] = index
-
-    def increase_value(self, old, new):
-        old_key = self.key(old)
-        assert self.key(new) >= old_key
-        index = self.map[old_key]
-        self.increase(index, new)
+    def __iter__(self):
+        node = self.next
+        while node is not None:
+            yield node.data
+            node = node.next
 
 
 class LFUPolicy(BaseCachePolicy):
-    def __init__(self, maxsize):
-        assert maxsize > 0
+    def __init__(self, maxsize: int):
         self.maxsize = maxsize
-        self.minset = MinSet(lambda x: x[:2])
-        self.map = dict()   # key -> (freq, serial)
-        self.serial = 0
-
-    def _get_serial(self):
-        self.serial += 1
-        return self.serial
+        self.freq_list = LinkedList()   # freq: int, order_list: LinkedList[Type[key]]
+        self.key_to_node = dict()       # key -> (freq_list_node, order_list_node)
 
     def touch(self, key):
-        assert key is not None
         try:
-            freq, serial = self.map[key]
+            freq_list_node, order_list_node = self.key_to_node[key]
         except KeyError:
-            key_id = (0, self._get_serial())
-            mskey = key_id + (key,)
-            if len(self.minset) >= self.maxsize:
-                _, _, evicted = self.minset.poppush(mskey)
-                del self.map[evicted]
-                self.map[key] = key_id
-                return evicted
-            else:
-                self.minset.push(mskey)
-        else:
-            old_mskey = (freq, serial, key)
-            assert old_mskey in self.minset
-            key_id = (freq + 1, self._get_serial())
-            mskey = key_id + (key,)
-            self.minset.increase_value(old_mskey, mskey)
+            # eviction before insertion
+            evicted = None
+            if len(self.key_to_node) >= self.maxsize:
+                evicted = self._evict()
 
-        self.map[key] = key_id
+            # get lowest order list
+            if self.freq_list.is_empty():
+                self.freq_list.insert_head((1, (LinkedList())))
+            freq_list_node = self.freq_list.get_head()
+
+            # insert key to order list
+            freq, order_list = freq_list_node.data
+            assert freq == 1
+            order_list_node = order_list.insert_head(key)
+            self.key_to_node[key] = freq_list_node, order_list_node
+
+            return evicted
+        else:
+            freq, order_list = freq_list_node.data
+            assert order_list_node.data == key
+            # remove key from old frequency
+            order_list.remove_node(order_list_node)
+
+            # next frequency
+            if freq_list_node.next is None or freq_list_node.next.data[0] != freq + 1:
+                next_freq_list_node = LLNode((freq + 1, LinkedList()))
+                self.freq_list.insert_node_after(freq_list_node, next_freq_list_node)
+
+            next_freq, next_order_list = freq_list_node.next.data
+            assert next_freq == freq + 1
+
+            # add key to new frequency
+            next_order_list_node = next_order_list.insert_head(key)
+            self.key_to_node[key] = freq_list_node.next, next_order_list_node
+
+            # remove empty order list
+            if order_list.is_empty() and freq != 1:
+                self.freq_list.remove_node(freq_list_node)
+
+    def _evict(self):
+        freq_list_node = self.freq_list.get_head()
+        freq, order_list = freq_list_node.data
+        if order_list.is_empty():   # lowest order list is empty, try next.
+            assert freq == 1
+            freq_list_node = freq_list_node.next
+            freq, order_list = freq_list_node.data
+
+        key = order_list.pop_tail()
+        del self.key_to_node[key]
+        # remove empty order list
+        if freq != 1 and order_list.is_empty():
+            self.freq_list.remove_node(freq_list_node)
+        return key
 
     def remove(self, key):
-        self.minset.remove(self.map.pop(key) + (key,))
+        freq_list_node, order_list_node = self.key_to_node.pop(key)
+        freq, order_list = freq_list_node.data
+        order_list.remove_node(order_list_node)
+        # remove empty order list
+        if freq != 1 and order_list.is_empty():
+            self.freq_list.remove_node(freq_list_node)
 
     def clear(self):
-        self.minset.clear()
-        self.map.clear()
+        self.freq_list.clear()
+        self.key_to_node.clear()
 
 
 class TTLCache:
@@ -221,7 +209,7 @@ class TTLCache:
         self.policy = policy or UnlimitedPolicy()
         self.reactor = get_reactor(reactor)
 
-        self.map = dict()
+        self.map = dict()   # key -> (value, expire_time)
         self.started_time = None    # type: float
         self.pending_clean = dict()
         self.delayed_calls = dict()
