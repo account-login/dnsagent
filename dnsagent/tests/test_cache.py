@@ -2,7 +2,7 @@ import pytest
 from twisted.internet import task
 from twisted.trial import unittest
 
-from dnsagent.cache import LinkedList, LLNode, LFUPolicy, LRUPolicy, TTLCache
+from dnsagent.cache import LinkedList, LFUPolicy, LRUPolicy, TTLCache
 
 
 class TestLinkedList(unittest.TestCase):
@@ -46,7 +46,7 @@ class TestLinkedList(unittest.TestCase):
                 nodes.append(self.ll.insert_head(i))
             nodes.reverse()
 
-            self.ll.insert_node_after(nodes[pos], LLNode(10))
+            self.ll.insert_after(nodes[pos], 10)
             lst = list(reversed(range(5)))
             lst.insert(pos + 1, 10)
             self.check(lst)

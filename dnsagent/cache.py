@@ -92,7 +92,8 @@ class LinkedList(LLNode):
         llnode_insert(self, node)
         return node
 
-    def insert_node_after(self, node: LLNode, after: LLNode):
+    def insert_after(self, node: LLNode, data):
+        after = LLNode(data)
         if node is self.tail:
             self.tail = after
         llnode_insert(node, after)
@@ -161,8 +162,7 @@ class LFUPolicy(BaseCachePolicy):
 
             # next frequency
             if freq_list_node.next is None or freq_list_node.next.data[0] != freq + 1:
-                next_freq_list_node = LLNode((freq + 1, LinkedList()))
-                self.freq_list.insert_node_after(freq_list_node, next_freq_list_node)
+                self.freq_list.insert_after(freq_list_node, (freq + 1, LinkedList()))
 
             next_freq, next_order_list = freq_list_node.next.data
             assert next_freq == freq + 1
