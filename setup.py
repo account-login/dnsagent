@@ -22,7 +22,7 @@ setup(
     ],
     extras_require={
         ':python_version<"3.5"': ['typing'],
-        'windows': ['pypiwin32', 'wincertstore'],   # twisted dependancy
+        'windows': ['pypiwin32', 'wincertstore'],   # twisted dependency
     },
     python_requires='>=3.4',
     url='https://github.com/account-login/dnsagent',

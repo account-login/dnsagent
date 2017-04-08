@@ -1,6 +1,6 @@
 # TODO: round robin
 # TODO: recursive resolver
-# TODO: edns client subnet: policy, caching, server response
+# TODO: edns client subnet: caching, server response
 # TODO: statistics
 # TODO: persistant tcp connection
 # TODO: dispaching based on input

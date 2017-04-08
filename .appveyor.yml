@@ -27,3 +27,14 @@ on_success:
 
 artifacts:
   - path: 'dist\*'
+
+deploy:
+  - provider: BinTray
+    username: account-login
+    api_key:
+      secure: sN9FQjrN3OAkzbVf9c8MxpJNaZp6jCWlhfzCl8Hyqx76dVgsPo3lTxWU2A6tggbk
+    subject: account-login
+    repo: dnsagent
+    package: dnsagent
+#    publish: true
+#    override: true
