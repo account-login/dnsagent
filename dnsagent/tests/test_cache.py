@@ -10,21 +10,21 @@ class TestLinkedList(unittest.TestCase):
         self.ll = LinkedList()
 
     def check(self, items):
-        node = self.ll
-        while node.next:
-            assert node.next.prev is node
-            node = node.next
-        if not items:
-            assert self.ll.tail is None
-        else:
-            assert self.ll.tail is node
+        if not self.ll.empty():
+            prev = self.ll.end()
+            next = self.ll.front()
+            while True:
+                assert next.prev is prev
+                if next is self.ll:
+                    break
+                prev, next = next, next.next
 
         assert list(self.ll) == list(items)
 
     def test_insert_head(self):
         self.check([])
         for i in range(5):
-            self.ll.insert_head(i)
+            self.ll.push_front(i)
             self.check(reversed(range(i + 1)))
 
     def test_remove_node(self):
@@ -32,10 +32,10 @@ class TestLinkedList(unittest.TestCase):
             self.ll.clear()
             nodes = []
             for i in range(5):
-                nodes.append(self.ll.insert_head(i))
+                nodes.append(self.ll.push_front(i))
             nodes.reverse()
 
-            self.ll.remove_node(nodes[to_remove])
+            nodes[to_remove].remove()
             self.check([node.data for index, node in enumerate(nodes) if index != to_remove])
 
     def test_insert_after(self):
@@ -43,19 +43,19 @@ class TestLinkedList(unittest.TestCase):
             self.ll.clear()
             nodes = []
             for i in range(5):
-                nodes.append(self.ll.insert_head(i))
+                nodes.append(self.ll.push_front(i))
             nodes.reverse()
 
-            self.ll.insert_after(nodes[pos], 10)
+            nodes[pos].insert_after(10)
             lst = list(reversed(range(5)))
             lst.insert(pos + 1, 10)
             self.check(lst)
 
     def test_pop_tail(self):
         for i in range(5):
-            self.ll.insert_head(i)
+            self.ll.push_front(i)
         for i in range(5):
-            assert self.ll.pop_tail() == i
+            assert self.ll.pop_back().data == i
 
 
 class TestLFUPolicy(unittest.TestCase):

@@ -50,81 +50,57 @@ class LRUPolicy(BaseCachePolicy):
         self.od.clear()
 
 
-class LLNode:
-    __slots__ = ('data', 'prev', 'next')
-
+class LinkedNode:
     def __init__(self, data):
         self.data = data
-        self.prev = None
-        self.next = None
+        self.prev = self.next = self
+
+    def remove(self):
+        self.prev.next = self.next
+        self.next.prev = self.prev
+        self.prev = self.next = None
+        return self
+
+    def insert_after(self, key):
+        after = LinkedNode(key)
+        after.prev = self
+        after.next = self.next
+        self.next.prev = self.next = after
+        return after
 
 
-def llnode_insert(node: LLNode, new_node: LLNode):
-    new_node.prev = node
-
-    new_node.next = node.next
-    if new_node.next is not None:
-        new_node.next.prev = new_node
-
-    node.next = new_node
-
-
-def llnode_remove(node: LLNode):
-    node.prev.next = node.next
-    if node.next is not None:
-        node.next.prev = node.prev
-
-
-class LinkedList(LLNode):
+class LinkedList(LinkedNode):
     def __init__(self):
         super().__init__(None)
-        self.tail = None
 
-    def get_head(self) -> LLNode:
-        if self.next is None:
-            raise ValueError('Empty LinkedList')
+    def end(self):
+        return self
+
+    def front(self):
+        assert not self.empty()
         return self.next
 
-    def insert_head(self, data) -> LLNode:
-        node = LLNode(data)
-        if self.tail is None:
-            self.tail = node
-        llnode_insert(self, node)
-        return node
+    def back(self):
+        assert not self.empty()
+        return self.prev
 
-    def insert_after(self, node: LLNode, data):
-        after = LLNode(data)
-        if node is self.tail:
-            self.tail = after
-        llnode_insert(node, after)
-
-    def remove_node(self, node: LLNode):
-        if node is self.tail:
-            self.tail = self.tail.prev
-            if self.tail is self:
-                self.tail = None
-        llnode_remove(node)
-
-    def pop_tail(self):
-        node = self.tail
-        self.tail = self.tail.prev
-        if self.tail is self:
-            self.tail = None
-        llnode_remove(node)
-        return node.data
-
-    def is_empty(self):
-        return self.next is None
+    def empty(self):
+        return self.prev is self
 
     def clear(self):
-        self.next = None
-        self.tail = None
+        self.prev = self.next = self
+
+    def push_front(self, key):
+        return self.insert_after(key)
+
+    def pop_back(self):
+        return self.back().remove()
 
     def __iter__(self):
-        node = self.next
-        while node is not None:
-            yield node.data
-            node = node.next
+        cur = self.next
+        while cur is not self:
+            yield cur.data
+            cur = cur.next
 
 
 class LFUPolicy(BaseCachePolicy):
@@ -143,14 +119,14 @@ class LFUPolicy(BaseCachePolicy):
                 evicted = self._evict()
 
             # get lowest order list
-            if self.freq_list.is_empty():
-                self.freq_list.insert_head((1, (LinkedList())))
-            freq_list_node = self.freq_list.get_head()
+            if self.freq_list.empty():
+                self.freq_list.push_front((1, (LinkedList())))
+            freq_list_node = self.freq_list.front()
 
             # insert key to order list
             freq, order_list = freq_list_node.data
             assert freq == 1
-            order_list_node = order_list.insert_head(key)
+            order_list_node = order_list.push_front(key)
             self.key_to_node[key] = freq_list_node, order_list_node
 
             return evicted
@@ -158,45 +134,46 @@ class LFUPolicy(BaseCachePolicy):
             freq, order_list = freq_list_node.data
             assert order_list_node.data == key
             # remove key from old frequency
-            order_list.remove_node(order_list_node)
+            order_list_node.remove()
 
             # next frequency
-            if freq_list_node.next is None or freq_list_node.next.data[0] != freq + 1:
-                self.freq_list.insert_after(freq_list_node, (freq + 1, LinkedList()))
+            if (
+                freq_list_node.next is self.freq_list.end()
+                or freq_list_node.next.data[0] != freq + 1
+            ):
+                freq_list_node.insert_after((freq + 1, LinkedList()))
 
             next_freq, next_order_list = freq_list_node.next.data
             assert next_freq == freq + 1
 
             # add key to new frequency
-            next_order_list_node = next_order_list.insert_head(key)
+            next_order_list_node = next_order_list.push_front(key)
             self.key_to_node[key] = freq_list_node.next, next_order_list_node
 
-            # remove empty order list
-            if order_list.is_empty() and freq != 1:
-                self.freq_list.remove_node(freq_list_node)
+            self._remove_empty_freq_list_node(freq_list_node)
 
     def _evict(self):
-        freq_list_node = self.freq_list.get_head()
+        freq_list_node = self.freq_list.front()
         freq, order_list = freq_list_node.data
-        if order_list.is_empty():   # lowest order list is empty, try next.
+        if order_list.empty():      # lowest order list is empty, try next.
             assert freq == 1
             freq_list_node = freq_list_node.next
             freq, order_list = freq_list_node.data
 
-        key = order_list.pop_tail()
+        key = order_list.pop_back().data
         del self.key_to_node[key]
-        # remove empty order list
-        if freq != 1 and order_list.is_empty():
-            self.freq_list.remove_node(freq_list_node)
+        self._remove_empty_freq_list_node(freq_list_node)
         return key
 
     def remove(self, key):
         freq_list_node, order_list_node = self.key_to_node.pop(key)
+        order_list_node.remove()
+        self._remove_empty_freq_list_node(freq_list_node)
+
+    def _remove_empty_freq_list_node(self, freq_list_node):
         freq, order_list = freq_list_node.data
-        order_list.remove_node(order_list_node)
-        # remove empty order list
-        if freq != 1 and order_list.is_empty():
-            self.freq_list.remove_node(freq_list_node)
+        if freq != 1 and order_list.empty():
+            freq_list_node.remove()
 
     def clear(self):
         self.freq_list.clear()
