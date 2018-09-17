@@ -61,10 +61,6 @@ class TestCnResolver(BaseTestResolver):
         self.fake_resolver.set_answer('asdf', '8.8.8.8')
         self.check_a('asdf', fail=MayBePolluted)
 
-    def test_ab_multiple_addr(self):
-        self.fake_resolver.set_multiple_answer('asdf', [('8.8.8.8', 60), ('8.8.4.4', 60)])
-        self.check_a('asdf', iplist('8.8.8.8', '8.8.4.4'))
-
     def test_ipv6(self):
         self.fake_resolver.set_answer('asdf', '2001:400::')
         self.check_aaaa('asdf', fail=MayBePolluted)

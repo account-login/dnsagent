@@ -42,8 +42,7 @@ class CnResolver(BaseResolver):
     def drop_potential_polluted(self, result):
         """Result that contains exactly 1 foreign ip is considered potentially polluted."""
         answers, authority, additional = result
-        if len(answers) == 1:
-            rr = answers[0]  # type: dns.RRHeader
+        for rr in answers:  # type: dns.RRHeader
             ip = rrheader_to_ip(rr)
             if ip and not self.is_cn_ip(ip):
                 raise MayBePolluted(ip)
